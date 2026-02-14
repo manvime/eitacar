@@ -1,0 +1,10 @@
+git add app/login/page.js
+git commit -m "Login: exigir verificação e botão reenviar link"
+git push
+
+se for no page, se não vai trocando
+
+git add app/components/TopNav.jsx
+git commit -m "TopNav: esconder Buscar/Chats até login verificado"
+git push
+
