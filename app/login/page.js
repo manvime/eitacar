@@ -26,21 +26,19 @@ export default function LoginPage() {
   const [sendingVerify, setSendingVerify] = useState(false);
   const [verifyInfo, setVerifyInfo] = useState("");
 
-  // ✅ qual botão foi clicado por último
+  // qual botão foi clicado por último
   const [activeBtn, setActiveBtn] = useState(null); // "login" | "register" | "reset" | null
+
+  // ✅ mostrar "Entrando..."
+  const [isEntering, setIsEntering] = useState(false);
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u || null);
 
+      // se entrou, mas está verificando ou não
       if (u) {
         setNeedsVerify(!u.emailVerified);
-
-        if (u.emailVerified) {
-          try {
-            await apiPost("/api/upsertUserProfile", {});
-          } catch (e) {}
-        }
       } else {
         setNeedsVerify(false);
       }
@@ -50,6 +48,7 @@ export default function LoginPage() {
   async function handleRegister() {
     try {
       setVerifyInfo("");
+      setIsEntering(false);
 
       if (!email) return setMsg("Digite seu email.");
       if (!pass) return setMsg("Digite sua senha.");
@@ -61,7 +60,6 @@ export default function LoginPage() {
         "Conta criada! Enviamos um email de verificação. Verifique sua caixa de entrada (e spam). Depois faça login."
       );
 
-      // força verificação antes de usar
       await signOut(auth);
     } catch (e) {
       const code = e?.code || "";
@@ -76,16 +74,23 @@ export default function LoginPage() {
   async function handleLogin() {
     try {
       setVerifyInfo("");
+      setIsEntering(true);
 
-      if (!email) return setMsg("Digite seu email.");
-      if (!pass) return setMsg("Digite sua senha.");
+      if (!email) {
+        setIsEntering(false);
+        return setMsg("Digite seu email.");
+      }
+      if (!pass) {
+        setIsEntering(false);
+        return setMsg("Digite sua senha.");
+      }
 
       const cred = await signInWithEmailAndPassword(auth, email, pass);
       await cred.user.reload();
 
       if (!cred.user.emailVerified) {
-        // ✅ só mostra bloco de verificação (sem msg duplicada)
         setNeedsVerify(true);
+        setIsEntering(false);
         return;
       }
 
@@ -93,8 +98,11 @@ export default function LoginPage() {
         await apiPost("/api/upsertUserProfile", {});
       } catch (e) {}
 
+      // mantém "Entrando..." até sair da página
       window.location.href = "/buscar";
     } catch (e) {
+      setIsEntering(false);
+
       const code = e?.code || "";
       if (code === "auth/wrong-password" || code === "auth/invalid-credential")
         setMsg("Senha incorreta.");
@@ -107,6 +115,8 @@ export default function LoginPage() {
   async function resendVerification() {
     try {
       setVerifyInfo("");
+      setIsEntering(false);
+
       if (!auth.currentUser) {
         setVerifyInfo("Faça login primeiro.");
         return;
@@ -126,8 +136,11 @@ export default function LoginPage() {
   async function resetPass() {
     try {
       setVerifyInfo("");
+      setIsEntering(false);
+
       if (!email) return setMsg("Digite seu email primeiro.");
       await sendPasswordResetEmail(auth, email);
+
       setMsg("Email de redefinição enviado (se existir conta).");
     } catch (e) {
       const code = e?.code || "";
@@ -138,15 +151,16 @@ export default function LoginPage() {
   }
 
   async function logout() {
-    await signOut(auth);
-    setNeedsVerify(false);
+    setIsEntering(false);
     setVerifyInfo("");
+    setNeedsVerify(false);
+    await signOut(auth);
     setMsg("Saiu.");
   }
 
   return (
-    <div style={{ maxWidth: 520, fontFamily: "Arial, sans-serif" }}>
-      <h2></h2>
+    <div style={{ maxWidth: 720, fontFamily: "Arial, sans-serif" }}>
+      <h2>Login</h2>
 
       <label>Email</label>
       <input style={inp} value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -159,9 +173,10 @@ export default function LoginPage() {
         onChange={(e) => setPass(e.target.value)}
       />
 
-      {/* ✅ Botões lado a lado + highlight suave no último clicado */}
+      {/* Botões lado a lado + highlight suave */}
       <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
         <button
+          disabled={isEntering}
           style={btnAction(activeBtn === "login")}
           onClick={() => {
             setActiveBtn("login");
@@ -172,6 +187,7 @@ export default function LoginPage() {
         </button>
 
         <button
+          disabled={isEntering}
           style={btnAction(activeBtn === "register")}
           onClick={() => {
             setActiveBtn("register");
@@ -182,6 +198,7 @@ export default function LoginPage() {
         </button>
 
         <button
+          disabled={isEntering}
           style={btnAction(activeBtn === "reset")}
           onClick={() => {
             setActiveBtn("reset");
@@ -192,7 +209,21 @@ export default function LoginPage() {
         </button>
       </div>
 
-      {/* ✅ Bloco verificação (sem mensagem duplicada) */}
+      {/* ✅ Entrando... (quando login OK) */}
+      {isEntering && !needsVerify && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: 12,
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 10,
+          }}
+        >
+          Entrando...
+        </div>
+      )}
+
+      {/* Bloco verificação */}
       {needsVerify && (
         <div style={{ marginTop: 14 }}>
           <div
@@ -228,23 +259,7 @@ export default function LoginPage() {
         </div>
       )}
 
-      {/* Info do usuário quando estiver logado e verificado */}
-      {user && !needsVerify && (
-        <div style={{ marginTop: 12 }}>
-          <div>
-            <b>Usuário:</b> {user.email}
-          </div>
-          <div>
-            <b>Email verificado:</b> {String(user.emailVerified)}
-          </div>
-
-          <button style={{ ...btnOutline, marginTop: 10 }} onClick={logout}>
-            Sair
-          </button>
-        </div>
-      )}
-
-      {/* ✅ Popup com OK (não aparece quando needsVerify=true) */}
+      {/* Popup com OK (não aparece quando needsVerify=true) */}
       {msg && !needsVerify && (
         <div
           style={{
@@ -261,7 +276,7 @@ export default function LoginPage() {
           <div
             style={{
               width: "100%",
-              maxWidth: 520,
+              maxWidth: 560,
               background: "#0b0b0b",
               border: "1px solid rgba(255,255,255,0.18)",
               borderRadius: 14,
@@ -287,7 +302,7 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => {
                   setMsg("");
-                  setActiveBtn(null); // ✅ volta todos ao padrão quando fecha
+                  setActiveBtn(null);
                 }}
                 style={{
                   padding: "10px 16px",
@@ -322,15 +337,17 @@ const inp = {
 
 const btnBase = {
   flex: 1,
+  minWidth: 150,
   padding: "10px 14px",
   borderRadius: 10,
   border: "1px solid rgba(255,255,255,0.15)",
-  background: "rgba(255,255,255,0.10)", // ✅ cor padrão (igual ao Entrar)
+  background: "rgba(255,255,255,0.10)", // cor padrão (igual ao Entrar)
   color: "white",
   fontWeight: 700,
   cursor: "pointer",
   textAlign: "center",
-  transition: "all 180ms ease", // ✅ suave
+  transition: "all 180ms ease",
+  opacity: 1,
 };
 
 const btnAction = (active) => ({
