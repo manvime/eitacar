@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import sharp from "sharp";
 
+// Força Node runtime (precisa para lidar bem com multipart + fetch externo)
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -10,8 +10,9 @@ function extractBrazilPlate(text) {
   const t = String(text)
     .toUpperCase()
     .replace(/[\s\r\n\t]/g, " ")
-    .replace(/[^\w]/g, " ");
+    .replace(/[^\w]/g, " "); // troca pontuação por espaço
 
+  // BR:
   // Antiga: ABC1234
   const reOld = /\b([A-Z]{3}\d{4})\b/g;
   // Mercosul: ABC1D23
@@ -24,43 +25,28 @@ function extractBrazilPlate(text) {
   const m2 = [...t.matchAll(reOld)];
   if (m2.length) return m2[0][1];
 
-  // tentativa extra (sem espaços)
+  // tentativa extra: remover espaços e procurar de novo
   const compact = t.replace(/\s+/g, "");
   const m3 = compact.match(/([A-Z]{3}\d[A-Z]\d{2}|[A-Z]{3}\d{4})/);
   return m3 ? m3[1] : "";
 }
 
-async function centerCropForPlate(buffer) {
-  // Crop central para reduzir “muitos carros” na foto.
-  // Ajuste fácil aqui se quiser:
-  // - cropWPercent: 0.7 => pega 70% da largura
-  // - cropHPercent: 0.45 => pega 45% da altura
-  const cropWPercent = 0.7;
-  const cropHPercent = 0.45;
+function base64ToFile(base64, filename = "plate.jpg") {
+  // base64 pode vir como:
+  // "data:image/jpeg;base64,...." ou só o "...."
+  const cleaned = String(base64).trim();
+  const match = cleaned.match(/^data:(.+);base64,(.*)$/);
+  const mime = match?.[1] || "image/jpeg";
+  const b64 = match?.[2] || cleaned;
 
-  const img = sharp(buffer);
-  const meta = await img.metadata();
-  if (!meta.width || !meta.height) return buffer;
-
-  const w = meta.width;
-  const h = meta.height;
-
-  const cropW = Math.max(1, Math.floor(w * cropWPercent));
-  const cropH = Math.max(1, Math.floor(h * cropHPercent));
-  const left = Math.max(0, Math.floor((w - cropW) / 2));
-  const top = Math.max(0, Math.floor((h - cropH) / 2));
-
-  const out = await img
-    .extract({ left, top, width: cropW, height: cropH })
-    .jpeg({ quality: 90 })
-    .toBuffer();
-
-  return out;
+  const bytes = Buffer.from(b64, "base64");
+  // Node 18+ tem File nativo no runtime do Next (nodejs).
+  return new File([bytes], filename, { type: mime });
 }
 
 export async function POST(request) {
   try {
-    // Recomendo manter: evita abuso do endpoint
+    // Exigir token para evitar abuso
     const authHeader = request.headers.get("authorization") || "";
     if (!authHeader.toLowerCase().startsWith("bearer ")) {
       return NextResponse.json({ error: "Sem token" }, { status: 401 });
@@ -74,30 +60,35 @@ export async function POST(request) {
       );
     }
 
-    const form = await request.formData();
-    const file = form.get("image");
+    const contentType = request.headers.get("content-type") || "";
+
+    let file = null;
+
+    // 1) multipart/form-data (recomendado)
+    if (contentType.includes("multipart/form-data")) {
+      const form = await request.formData();
+      file = form.get("image");
+
+      // fallback: permitir base64 via form também
+      if (!file) {
+        const imageBase64 = form.get("imageBase64");
+        if (imageBase64) file = base64ToFile(imageBase64, "plate.jpg");
+      }
+    } else {
+      // 2) JSON: { imageBase64: "..." }
+      const body = await request.json().catch(() => null);
+      const imageBase64 = body?.imageBase64;
+      if (imageBase64) file = base64ToFile(imageBase64, "plate.jpg");
+    }
 
     if (!file) {
       return NextResponse.json(
-        { error: "Envie a imagem no campo 'image' (multipart/form-data)." },
+        { error: "Envie o arquivo 'image' (multipart) ou 'imageBase64' (json/form)." },
         { status: 400 }
       );
     }
 
-    // Converte File/Blob -> Buffer
-    const arrayBuffer = await file.arrayBuffer();
-    const inputBuffer = Buffer.from(arrayBuffer);
-
-    // Crop central (melhora quando tem muitos carros)
-    let croppedBuffer = inputBuffer;
-    try {
-      croppedBuffer = await centerCropForPlate(inputBuffer);
-    } catch {
-      // se sharp falhar por algum motivo, segue sem crop
-      croppedBuffer = inputBuffer;
-    }
-
-    // Monta form para OCR.Space
+    // Envia para OCR.Space
     const ocrForm = new FormData();
     ocrForm.append("apikey", apiKey);
     ocrForm.append("language", "por");
@@ -105,10 +96,7 @@ export async function POST(request) {
     ocrForm.append("detectOrientation", "true");
     ocrForm.append("OCREngine", "2");
     ocrForm.append("scale", "true");
-
-    // Buffer -> Blob (jpeg)
-    const blob = new Blob([croppedBuffer], { type: "image/jpeg" });
-    ocrForm.append("file", blob, "plate-crop.jpg");
+    ocrForm.append("file", file, file?.name || "plate.jpg");
 
     const resp = await fetch("https://api.ocr.space/parse/image", {
       method: "POST",
@@ -116,7 +104,6 @@ export async function POST(request) {
     });
 
     const data = await resp.json().catch(() => null);
-
     if (!resp.ok || !data) {
       return NextResponse.json(
         { error: "Falha no OCR.Space", details: data || null },
@@ -140,14 +127,17 @@ export async function POST(request) {
       return NextResponse.json(
         {
           error:
-            "Não consegui identificar a placa. Tente foto de frente, sem reflexo e mais próxima.",
-          rawText: parsedText, // útil para debug (pode remover depois)
+            "Não consegui identificar a placa. Recorte só a placa e envie uma foto de frente, nítida e sem reflexo.",
+          rawText: parsedText,
         },
         { status: 422 }
       );
     }
 
-    return NextResponse.json({ plate });
+    return NextResponse.json({
+      plate,
+      rawText: parsedText, // remova depois se quiser
+    });
   } catch (err) {
     return NextResponse.json(
       { error: "Erro interno no scan", details: String(err?.message || err) },
