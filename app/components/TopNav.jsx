@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
 import "@/lib/firebaseClient"; // garante que o firebase client foi inicializado
 
 export default function TopNav() {
@@ -11,14 +11,20 @@ export default function TopNav() {
   const router = useRouter();
 
   const [userEmail, setUserEmail] = useState("");
-  const adminEmail = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "").toLowerCase();
+  const [loadingAuth, setLoadingAuth] = useState(true);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const adminEmail = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "").toLowerCase().trim();
 
   useEffect(() => {
     const auth = getAuth();
     return onAuthStateChanged(auth, (u) => {
       setUserEmail((u?.email || "").toLowerCase());
+      setLoadingAuth(false);
     });
   }, []);
+
+  const isLoggedIn = !!userEmail && !loadingAuth;
 
   const isActive = (href) => pathname === href;
 
@@ -30,35 +36,68 @@ export default function TopNav() {
     color: "white",
     textDecoration: "none",
     fontWeight: 600,
+    cursor: "pointer",
   });
+
+  async function handleLogout() {
+    try {
+      setSigningOut(true);
+      const auth = getAuth();
+      await signOut(auth);
+      router.push("/login");
+      router.refresh();
+    } catch (e) {
+      console.error("logout failed:", e);
+      alert("Erro ao sair. Tente novamente.");
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 50, background: "#000" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 12 }}>
-        <div style={{ fontWeight: 800, color: "white", marginRight: 10 }}>olaCar</div>
+        {/* ✅ olaCar -> eitaCar */}
+        <div style={{ fontWeight: 800, color: "white", marginRight: 10 }}>eitaCar</div>
 
-        <Link href="/login" style={btnStyle(isActive("/login"))}>Login</Link>
-        <Link href="/buscar" style={btnStyle(isActive("/buscar"))}>Buscar</Link>
-        <Link href="/chats" style={btnStyle(isActive("/chats"))}>Chats</Link>
+        {/* ✅ Login sempre aparece */}
+        <Link href="/login" style={btnStyle(isActive("/login"))}>
+          Login
+        </Link>
 
-        {/* Admin só aparece pro seu email */}
-        {adminEmail && userEmail === adminEmail && (
-          <Link href="/admin" style={btnStyle(isActive("/admin"))}>Admin</Link>
+        {/* ✅ Buscar e Chats só depois do login */}
+        {isLoggedIn && (
+          <>
+            <Link href="/buscar" style={btnStyle(isActive("/buscar"))}>
+              Buscar
+            </Link>
+
+            <Link href="/chats" style={btnStyle(isActive("/chats"))}>
+              Chats
+            </Link>
+
+            {/* ✅ Admin só aparece pro seu email e só logado */}
+            {adminEmail && userEmail === adminEmail && (
+              <Link href="/admin" style={btnStyle(isActive("/admin"))}>
+                Admin
+              </Link>
+            )}
+          </>
         )}
 
         <div style={{ flex: 1 }} />
 
+        {/* ✅ Botão Sair (só logado) */}
+        {isLoggedIn && (
+          <button onClick={handleLogout} disabled={signingOut} style={btnStyle(false)}>
+            {signingOut ? "Saindo..." : "Sair"}
+          </button>
+        )}
+
+        {/* Mantive o Voltar como você tinha */}
         <button
           onClick={() => router.back()}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.15)",
-            background: "transparent",
-            color: "white",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
+          style={btnStyle(false)}
         >
           Voltar
         </button>
@@ -68,3 +107,4 @@ export default function TopNav() {
     </div>
   );
 }
+
