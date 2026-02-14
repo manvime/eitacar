@@ -20,6 +20,9 @@ export default function LoginPage() {
   const [user, setUser] = useState(null);
   const [msg, setMsg] = useState("");
 
+  const [needsVerify, setNeedsVerify] = useState(false);
+  const [sendingVerify, setSendingVerify] = useState(false);
+
   // ✅ carrega mensagem persistida (ex.: "email enviado")
   useEffect(() => {
     const saved = localStorage.getItem(NOTICE_KEY);
@@ -40,14 +43,21 @@ export default function LoginPage() {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u || null);
 
-      // Se logou, limpa aviso persistido para não ficar “grudado”
       if (u) {
-        clearMsg();
-        try {
-          await apiPost("/api/upsertUserProfile", {});
-        } catch (e) {
-          console.error("upsertUserProfile failed:", e);
+        // sempre atualiza estado de verificação ao entrar
+        setNeedsVerify(!u.emailVerified);
+
+        // Se estiver verificado, limpa aviso persistido e segue fluxo normal
+        if (u.emailVerified) {
+          clearMsg();
+          try {
+            await apiPost("/api/upsertUserProfile", {});
+          } catch (e) {
+            console.error("upsertUserProfile failed:", e);
+          }
         }
+      } else {
+        setNeedsVerify(false);
       }
     });
   }, []);
@@ -55,6 +65,7 @@ export default function LoginPage() {
   async function handleRegister() {
     try {
       clearMsg();
+      setNeedsVerify(false);
 
       if (!email) return setMsg("Digite seu email.");
       if (!pass) return setMsg("Digite sua senha.");
@@ -64,10 +75,9 @@ export default function LoginPage() {
 
       // ✅ mantém aparecendo mesmo após refresh
       setPersistentMsg(
-        "Email de verificação enviado! Verifique sua caixa de entrada (e spam). Depois faça login."
+        "Cadastro feito! Enviamos um email de verificação. Verifique sua caixa de entrada (e spam). Depois faça login."
       );
 
-      // desloga para forçar verificação antes de usar
       await signOut(auth);
     } catch (e) {
       const code = e?.code || "";
@@ -86,13 +96,24 @@ export default function LoginPage() {
   async function handleLogin() {
     try {
       clearMsg();
+      setNeedsVerify(false);
 
       if (!email) return setMsg("Digite seu email.");
       if (!pass) return setMsg("Digite sua senha.");
 
-      await signInWithEmailAndPassword(auth, email, pass);
+      const cred = await signInWithEmailAndPassword(auth, email, pass);
 
-      // tenta atualizar perfil, mas não trava login
+      // garante leitura atualizada de verificação
+      await cred.user.reload();
+
+      if (!cred.user.emailVerified) {
+        // ✅ trava aqui e mostra aviso + botão reenviar
+        setNeedsVerify(true);
+        setMsg("Falta verificar seu email. Clique em “Reenviar link de verificação”.");
+        return;
+      }
+
+      // verificado: segue normal
       try {
         await apiPost("/api/upsertUserProfile", {});
       } catch (e) {
@@ -117,10 +138,16 @@ export default function LoginPage() {
   async function resendVerification() {
     try {
       if (!auth.currentUser) return;
+
+      setSendingVerify(true);
       await sendEmailVerification(auth.currentUser);
-      setMsg("Email de verificação reenviado.");
+
+      // ✅ mantém aviso aparecendo mesmo após refresh
+      setPersistentMsg("Link de verificação reenviado! Verifique seu email (e spam).");
     } catch (e) {
       setMsg("Não foi possível reenviar. " + (e?.message || ""));
+    } finally {
+      setSendingVerify(false);
     }
   }
 
@@ -140,6 +167,7 @@ export default function LoginPage() {
 
   async function logout() {
     await signOut(auth);
+    setNeedsVerify(false);
     setMsg("Saiu.");
   }
 
@@ -176,7 +204,38 @@ export default function LoginPage() {
         </button>
       </div>
 
-      {user && (
+      {/* ✅ Aviso + botão reenviar verificação */}
+      {needsVerify && (
+        <div style={{ marginTop: 12 }}>
+          <div
+            style={{
+              padding: 10,
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 10,
+              marginBottom: 10,
+            }}
+          >
+            <b>Falta verificar seu email.</b>
+            <div style={{ marginTop: 6, opacity: 0.9 }}>
+              Abra seu email e clique no link de verificação.
+            </div>
+          </div>
+
+          <button
+            style={{ ...btnOutline, width: "100%", textAlign: "center" }}
+            onClick={resendVerification}
+            disabled={sendingVerify}
+          >
+            {sendingVerify ? "Enviando..." : "Reenviar link de verificação"}
+          </button>
+
+          <button style={{ ...btnOutline, width: "100%", marginTop: 10, textAlign: "center" }} onClick={logout}>
+            Sair
+          </button>
+        </div>
+      )}
+
+      {user && !needsVerify && (
         <div style={{ marginTop: 12 }}>
           <div>
             <b>Usuário:</b> {user.email}
@@ -184,12 +243,6 @@ export default function LoginPage() {
           <div>
             <b>Email verificado:</b> {String(user.emailVerified)}
           </div>
-
-          {!user.emailVerified && (
-            <button style={{ ...btnOutline, marginTop: 10 }} onClick={resendVerification}>
-              Reenviar verificação
-            </button>
-          )}
 
           <button style={{ ...btnOutline, marginTop: 10 }} onClick={logout}>
             Sair
