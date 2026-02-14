@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    function myPlate() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.myPlate;
+    }
+
+    // users: só o dono lê/escreve
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // vehicles: qualquer logado pode LER (pra validar placa destino).
+    // escrita bloqueada (só via Admin SDK na API /claim).
+    match /vehicles/{plate} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // threads: só participantes podem ler
+    match /threads/{threadId} {
+      allow read: if signedIn()
+        && myPlate() != null
+        && resource.data.participantsPlates != null
+        && (myPlate() in resource.data.participantsPlates);
+
+      allow write: if false;
+
+      // messages: só participantes podem ler
+      match /messages/{msgId} {
+        allow read: if signedIn()
+          && myPlate() != null
+          && get(/databases/$(database)/documents/threads/$(threadId)).data.participantsPlates != null
+          && (myPlate() in get(/databases/$(database)/documents/threads/$(threadId)).data.participantsPlates);
+
+        allow write: if false;
+      }
+    }
+  }
+}
+

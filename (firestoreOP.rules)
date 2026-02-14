@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function verified() { return signedIn() && request.auth.token.email_verified == true; }
+    function admin() { return signedIn() && request.auth.token.admin == true; }
+
+    match /users/{uid} {
+      allow read: if admin() || (verified() && request.auth.uid == uid);
+      allow write: if admin() || (signedIn() && request.auth.uid == uid);
+    }
+
+    match /userIndex/{emailKey} {
+      allow read, write: if admin();
+    }
+
+    match /vehicles/{plate} {
+      allow read: if false;
+      allow write: if admin();
+    }
+
+    match /threads/{threadId} {
+      allow create: if false;
+      allow read: if verified() && request.auth.uid in resource.data.participants;
+      allow update, delete: if false;
+
+      match /messages/{msgId} {
+        allow read: if verified()
+          && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants;
+
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /rateLimits/{id} {
+      allow read, write: if false;
+    }
+  }
+}
