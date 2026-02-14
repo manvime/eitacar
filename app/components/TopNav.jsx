@@ -10,21 +10,22 @@ export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [userEmail, setUserEmail] = useState("");
-  const [loadingAuth, setLoadingAuth] = useState(true);
-  const [signingOut, setSigningOut] = useState(false);
-
-  const adminEmail = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "").toLowerCase().trim();
+  const [user, setUser] = useState(null);
+  const adminEmail = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "").toLowerCase();
 
   useEffect(() => {
     const auth = getAuth();
     return onAuthStateChanged(auth, (u) => {
-      setUserEmail((u?.email || "").toLowerCase());
-      setLoadingAuth(false);
+      setUser(u || null);
     });
   }, []);
 
-  const isLoggedIn = !!userEmail && !loadingAuth;
+  const isLoggedIn = !!user;
+  const isVerified = !!user?.emailVerified;
+  const canAccessPrivate = isLoggedIn && isVerified;
+
+  const userEmail = (user?.email || "").toLowerCase();
+  const isAdmin = !!adminEmail && userEmail === adminEmail;
 
   const isActive = (href) => pathname === href;
 
@@ -41,43 +42,38 @@ export default function TopNav() {
 
   async function handleLogout() {
     try {
-      setSigningOut(true);
-      const auth = getAuth();
-      await signOut(auth);
+      await signOut(getAuth());
       router.push("/login");
-      router.refresh();
     } catch (e) {
-      console.error("logout failed:", e);
-      alert("Erro ao sair. Tente novamente.");
-    } finally {
-      setSigningOut(false);
+      console.error(e);
     }
   }
 
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 50, background: "#000" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 12 }}>
-        {/* ✅ olaCar -> eitaCar */}
-        <div style={{ fontWeight: 800, color: "white", marginRight: 10 }}>eitaCar</div>
+        <div style={{ fontWeight: 800, color: "white", marginRight: 10 }}>
+          eitaCar
+        </div>
 
-        {/* ✅ Login sempre aparece */}
-        <Link href="/login" style={btnStyle(isActive("/login"))}>
-          Login
-        </Link>
+        {/* ✅ Se NÃO estiver logado ou NÃO verificado -> só Login */}
+        {!canAccessPrivate && (
+          <Link href="/login" style={btnStyle(isActive("/login"))}>
+            Login
+          </Link>
+        )}
 
-        {/* ✅ Buscar e Chats só depois do login */}
-        {isLoggedIn && (
+        {/* ✅ Só aparece quando estiver realmente logado + verificado */}
+        {canAccessPrivate && (
           <>
             <Link href="/buscar" style={btnStyle(isActive("/buscar"))}>
               Buscar
             </Link>
-
             <Link href="/chats" style={btnStyle(isActive("/chats"))}>
               Chats
             </Link>
 
-            {/* ✅ Admin só aparece pro seu email e só logado */}
-            {adminEmail && userEmail === adminEmail && (
+            {isAdmin && (
               <Link href="/admin" style={btnStyle(isActive("/admin"))}>
                 Admin
               </Link>
@@ -87,17 +83,24 @@ export default function TopNav() {
 
         <div style={{ flex: 1 }} />
 
-        {/* ✅ Botão Sair (só logado) */}
-        {isLoggedIn && (
-          <button onClick={handleLogout} disabled={signingOut} style={btnStyle(false)}>
-            {signingOut ? "Saindo..." : "Sair"}
+        {/* ✅ Botão Sair só quando logado+verificado */}
+        {canAccessPrivate && (
+          <button onClick={handleLogout} style={btnStyle(false)}>
+            Sair
           </button>
         )}
 
-        {/* Mantive o Voltar como você tinha */}
         <button
           onClick={() => router.back()}
-          style={btnStyle(false)}
+          style={{
+            padding: "8px 14px",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.15)",
+            background: "transparent",
+            color: "white",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
         >
           Voltar
         </button>
@@ -107,4 +110,5 @@ export default function TopNav() {
     </div>
   );
 }
+
 
