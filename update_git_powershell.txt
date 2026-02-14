@@ -1,4 +1,4 @@
-git add app/login/page.js
+git add app/buscar/page.js
 git commit -m "Login: exigir verificação e botão reenviar link"
 git push
 
@@ -8,3 +8,9 @@ git add app/components/TopNav.jsx
 git commit -m "TopNav: esconder Buscar/Chats até login verificado"
 git push
 
+
+cd "C:\Users\marco\Desktop\Ocram\ocram"
+git status
+git add .
+git commit -m "Update app"
+git push origin main

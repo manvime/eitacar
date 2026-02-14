@@ -367,7 +367,7 @@ export default function BuscarPage() {
                   justifyContent: "space-between",
                 }}
               >
-                <div style={{ fontWeight: 800 }}>Ou subir foto da placa</div>
+                <div style={{ fontWeight: 800 }}>Foto da Placa</div>
 
                 {destPreviewUrl ? (
                   <img
@@ -383,7 +383,7 @@ export default function BuscarPage() {
                   />
                 ) : (
                   <div style={{ opacity: 0.7, fontSize: 13 }}>
-                    Envie uma foto bem nítida (sem reflexo, de frente).
+                    Envie uma foto.
                   </div>
                 )}
 
