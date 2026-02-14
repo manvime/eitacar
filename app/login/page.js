@@ -146,7 +146,7 @@ export default function LoginPage() {
 
   return (
     <div style={{ maxWidth: 520, fontFamily: "Arial, sans-serif" }}>
-      <h2>Login / Cadastro</h2>
+      <h2></h2>
 
       <label>Email</label>
       <input style={inp} value={email} onChange={(e) => setEmail(e.target.value)} />
