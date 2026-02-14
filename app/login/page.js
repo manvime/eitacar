@@ -24,7 +24,10 @@ export default function LoginPage() {
   // bloco de verificação
   const [needsVerify, setNeedsVerify] = useState(false);
   const [sendingVerify, setSendingVerify] = useState(false);
-  const [verifyInfo, setVerifyInfo] = useState(""); // mensagens só do bloco verificação
+  const [verifyInfo, setVerifyInfo] = useState("");
+
+  // ✅ qual botão foi clicado por último
+  const [activeBtn, setActiveBtn] = useState(null); // "login" | "register" | "reset" | null
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
@@ -33,7 +36,6 @@ export default function LoginPage() {
       if (u) {
         setNeedsVerify(!u.emailVerified);
 
-        // se estiver verificado, tenta upsert (não trava)
         if (u.emailVerified) {
           try {
             await apiPost("/api/upsertUserProfile", {});
@@ -48,18 +50,18 @@ export default function LoginPage() {
   async function handleRegister() {
     try {
       setVerifyInfo("");
+
       if (!email) return setMsg("Digite seu email.");
       if (!pass) return setMsg("Digite sua senha.");
 
       const cred = await createUserWithEmailAndPassword(auth, email, pass);
       await sendEmailVerification(cred.user);
 
-      // popup com OK
       setMsg(
         "Conta criada! Enviamos um email de verificação. Verifique sua caixa de entrada (e spam). Depois faça login."
       );
 
-      // sai para forçar verificação
+      // força verificação antes de usar
       await signOut(auth);
     } catch (e) {
       const code = e?.code || "";
@@ -79,17 +81,14 @@ export default function LoginPage() {
       if (!pass) return setMsg("Digite sua senha.");
 
       const cred = await signInWithEmailAndPassword(auth, email, pass);
-
-      // garante status atualizado
       await cred.user.reload();
 
       if (!cred.user.emailVerified) {
-        // ✅ só mostra o bloco de verificação (sem msg duplicada)
+        // ✅ só mostra bloco de verificação (sem msg duplicada)
         setNeedsVerify(true);
         return;
       }
 
-      // verificado: segue normal
       try {
         await apiPost("/api/upsertUserProfile", {});
       } catch (e) {}
@@ -116,7 +115,6 @@ export default function LoginPage() {
       setSendingVerify(true);
       await sendEmailVerification(auth.currentUser);
 
-      // ✅ mensagem aparece no bloco (não em msg)
       setVerifyInfo("Link reenviado! Verifique sua caixa de entrada (e spam).");
     } catch (e) {
       setVerifyInfo("Não foi possível reenviar. " + (e?.message || ""));
@@ -161,20 +159,40 @@ export default function LoginPage() {
         onChange={(e) => setPass(e.target.value)}
       />
 
-      {/* Botões lado a lado */}
+      {/* ✅ Botões lado a lado + highlight suave no último clicado */}
       <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-        <button style={btn} onClick={handleLogin}>
+        <button
+          style={btnAction(activeBtn === "login")}
+          onClick={() => {
+            setActiveBtn("login");
+            handleLogin();
+          }}
+        >
           Entrar
         </button>
-        <button style={btnOutline} onClick={handleRegister}>
+
+        <button
+          style={btnAction(activeBtn === "register")}
+          onClick={() => {
+            setActiveBtn("register");
+            handleRegister();
+          }}
+        >
           Cadastrar
         </button>
-        <button style={btnOutline} onClick={resetPass}>
+
+        <button
+          style={btnAction(activeBtn === "reset")}
+          onClick={() => {
+            setActiveBtn("reset");
+            resetPass();
+          }}
+        >
           Esqueci senha
         </button>
       </div>
 
-      {/* Bloco verificação (sem mensagem duplicada) */}
+      {/* ✅ Bloco verificação (sem mensagem duplicada) */}
       {needsVerify && (
         <div style={{ marginTop: 14 }}>
           <div
@@ -190,11 +208,7 @@ export default function LoginPage() {
               Abra seu email e clique no link de verificação.
             </div>
 
-            {verifyInfo && (
-              <div style={{ marginTop: 10, opacity: 0.9 }}>
-                {verifyInfo}
-              </div>
-            )}
+            {verifyInfo && <div style={{ marginTop: 10, opacity: 0.9 }}>{verifyInfo}</div>}
           </div>
 
           <button
@@ -271,7 +285,10 @@ export default function LoginPage() {
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
               <button
                 type="button"
-                onClick={() => setMsg("")}
+                onClick={() => {
+                  setMsg("");
+                  setActiveBtn(null); // ✅ volta todos ao padrão quando fecha
+                }}
                 style={{
                   padding: "10px 16px",
                   borderRadius: 12,
@@ -295,25 +312,35 @@ export default function LoginPage() {
 const inp = {
   width: "100%",
   padding: 10,
-  border: "1px solid #ccc",
-  borderRadius: 6,
+  border: "1px solid rgba(255,255,255,0.18)",
+  borderRadius: 8,
   marginTop: 6,
   marginBottom: 10,
+  background: "transparent",
+  color: "white",
 };
 
-const btn = {
+const btnBase = {
   flex: 1,
   padding: "10px 14px",
   borderRadius: 10,
   border: "1px solid rgba(255,255,255,0.15)",
-  background: "rgba(255,255,255,0.10)",
+  background: "rgba(255,255,255,0.10)", // ✅ cor padrão (igual ao Entrar)
   color: "white",
   fontWeight: 700,
   cursor: "pointer",
   textAlign: "center",
+  transition: "all 180ms ease", // ✅ suave
 };
 
+const btnAction = (active) => ({
+  ...btnBase,
+  background: active ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
+  border: active ? "1px solid rgba(255,255,255,0.28)" : "1px solid rgba(255,255,255,0.15)",
+  boxShadow: active ? "0 0 0 3px rgba(255,255,255,0.06)" : "none",
+});
+
 const btnOutline = {
-  ...btn,
+  ...btnBase,
   background: "transparent",
 };
