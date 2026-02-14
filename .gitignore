@@ -47,3 +47,6 @@ segredin/
 node_modules/
 .next/
 out/
+
+~$*.docx
+*.docx
