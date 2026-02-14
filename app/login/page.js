@@ -40,13 +40,12 @@ export default function LoginPage() {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u || null);
 
-      // Se logou, limpa avisos persistidos (pra não ficar aparecendo depois)
+      // Se logou, limpa aviso persistido para não ficar “grudado”
       if (u) {
         clearMsg();
         try {
           await apiPost("/api/upsertUserProfile", {});
         } catch (e) {
-          // não trava login por isso
           console.error("upsertUserProfile failed:", e);
         }
       }
@@ -93,14 +92,13 @@ export default function LoginPage() {
 
       await signInWithEmailAndPassword(auth, email, pass);
 
-      // atualiza perfil (se falhar, não impede o login)
+      // tenta atualizar perfil, mas não trava login
       try {
         await apiPost("/api/upsertUserProfile", {});
       } catch (e) {
         console.error("upsertUserProfile failed:", e);
       }
 
-      // ✅ depois do login vai aparecer Buscar/Chats no TopNav
       window.location.href = "/buscar";
     } catch (e) {
       const code = e?.code || "";
@@ -128,6 +126,7 @@ export default function LoginPage() {
 
   async function resetPass() {
     try {
+      clearMsg();
       if (!email) return setMsg("Digite seu email primeiro.");
       await sendPasswordResetEmail(auth, email);
       setMsg("Email de redefinição enviado (se existir conta).");
@@ -145,7 +144,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ maxWidth: 420, fontFamily: "Arial, sans-serif" }}>
+    <div style={{ maxWidth: 520, fontFamily: "Arial, sans-serif" }}>
       <h2>Login / Cadastro</h2>
 
       <label>Email</label>
@@ -154,15 +153,25 @@ export default function LoginPage() {
       <label>Senha</label>
       <input style={inp} type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
 
-      {/* ✅ 3 botões, um embaixo do outro */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-        <button style={btn} onClick={handleLogin}>
+      {/* ✅ 3 botões lado a lado */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          gap: 10,
+          marginTop: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <button style={{ ...btn, flex: 1, textAlign: "center" }} onClick={handleLogin}>
           Entrar
         </button>
-        <button style={btnOutline} onClick={handleRegister}>
+
+        <button style={{ ...btnOutline, flex: 1, textAlign: "center" }} onClick={handleRegister}>
           Cadastrar
         </button>
-        <button style={btnOutline} onClick={resetPass}>
+
+        <button style={{ ...btnOutline, flex: 1, textAlign: "center" }} onClick={resetPass}>
           Esqueci senha
         </button>
       </div>
@@ -189,7 +198,14 @@ export default function LoginPage() {
       )}
 
       {msg && (
-        <p style={{ marginTop: 12, padding: 10, border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10 }}>
+        <p
+          style={{
+            marginTop: 12,
+            padding: 10,
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 10,
+          }}
+        >
           {msg}
         </p>
       )}
@@ -214,7 +230,6 @@ const btn = {
   color: "white",
   fontWeight: 700,
   cursor: "pointer",
-  textAlign: "left",
 };
 
 const btnOutline = {
