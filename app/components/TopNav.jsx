@@ -2,29 +2,28 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
-import "@/lib/firebaseClient"; // garante que o firebase client foi inicializado
+import "@/lib/firebaseClient";
 
 export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [authReady, setAuthReady] = useState(false);
-  const [userEmail, setUserEmail] = useState("");
-
+  const [user, setUser] = useState(null);
   const adminEmail = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "").toLowerCase();
 
   useEffect(() => {
     const auth = getAuth();
-    return onAuthStateChanged(auth, (u) => {
-      setUserEmail((u?.email || "").toLowerCase());
-      setAuthReady(true);
-    });
+    return onAuthStateChanged(auth, (u) => setUser(u || null));
   }, []);
 
-  const isLogged = useMemo(() => !!userEmail, [userEmail]);
-  const isAdmin = useMemo(() => !!adminEmail && userEmail === adminEmail, [adminEmail, userEmail]);
+  const isLoggedIn = !!user;
+  const isVerified = !!user?.emailVerified;
+  const canAccessPrivate = isLoggedIn && isVerified;
+
+  const userEmail = (user?.email || "").toLowerCase();
+  const isAdmin = !!adminEmail && userEmail === adminEmail;
 
   const isActive = (href) => pathname === href;
 
@@ -35,46 +34,34 @@ export default function TopNav() {
     background: active ? "rgba(255,255,255,0.12)" : "transparent",
     color: "white",
     textDecoration: "none",
-    fontWeight: 700,
-    fontSize: 15,
+    fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
   });
 
   async function handleLogout() {
     try {
       await signOut(getAuth());
-    } finally {
       router.push("/login");
-      router.refresh();
+    } catch (e) {
+      console.error(e);
     }
   }
 
-  // "Sair do site": navegador normalmente NÃO deixa fechar aba/janela se não foi aberta via script.
-  // Então o "Sair" aqui é o logout + ir para /login (mais seguro e esperado).
-  // Se você quiser “sair do site” mesmo, pode trocar por: window.location.href = "about:blank";
-  const showRightButton = authReady && isLogged; // só mostra botão à direita quando estiver logado
-
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 50, background: "#000" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ fontWeight: 900, color: "white", marginRight: 10, fontSize: 18 }}>
-          eitaCar
-        </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 12 }}>
+        <div style={{ fontWeight: 800, color: "white", marginRight: 10 }}>eitaCar</div>
 
-        {/* Login sempre visível */}
-        <Link href="/login" style={btnStyle(isActive("/login"))}>
-          Login
-        </Link>
+        {/* NÃO logado ou NÃO verificado -> só Login */}
+        {!canAccessPrivate && (
+          <Link href="/login" style={btnStyle(isActive("/login"))}>
+            Login
+          </Link>
+        )}
 
-        {/* Só aparece depois que estiver logado */}
-        {authReady && isLogged && (
+        {/* Logado + verificado -> Perfil/Buscar/Chats/Admin */}
+        {canAccessPrivate && (
           <>
             <Link href="/perfil" style={btnStyle(isActive("/perfil"))}>
               Perfil
@@ -85,8 +72,6 @@ export default function TopNav() {
             <Link href="/chats" style={btnStyle(isActive("/chats"))}>
               Chats
             </Link>
-
-            {/* Admin só aparece pro email admin */}
             {isAdmin && (
               <Link href="/admin" style={btnStyle(isActive("/admin"))}>
                 Admin
@@ -97,21 +82,9 @@ export default function TopNav() {
 
         <div style={{ flex: 1 }} />
 
-        {/* Em vez de Voltar: Sair (somente logado) */}
-        {showRightButton && (
-          <button
-            onClick={handleLogout}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 10,
-              border: "1px solid rgba(255,255,255,0.15)",
-              background: "rgba(255,255,255,0.06)",
-              color: "white",
-              fontWeight: 800,
-              cursor: "pointer",
-              fontSize: 15,
-            }}
-          >
+        {/* Sair só quando logado+verificado */}
+        {canAccessPrivate && (
+          <button onClick={handleLogout} style={btnStyle(false)}>
             Sair
           </button>
         )}
