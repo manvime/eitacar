@@ -6,8 +6,8 @@ export const metadata = {
   description: "eitaCar",
   viewport: {
     width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
+    initialScale: 2,
+    maximumScale: 2,
   },
 };
 
