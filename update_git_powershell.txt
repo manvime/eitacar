@@ -9,8 +9,19 @@ git commit -m "TopNav: esconder Buscar/Chats até login verificado"
 git push
 
 
+git add lib/firebaseClient.js
+git commit -m "Login: exigir verificação e botão reenviar link"
+git push
+
 cd "C:\Users\marco\Desktop\Ocram\ocram"
 git status
 git add .
 git commit -m "Update app"
+git push origin main
+
+
+cd "C:\Users\marco\Desktop\Ocram\ocram"
+git status
+git add .
+git commit -m "Update lib"
 git push origin main

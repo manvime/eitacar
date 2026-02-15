@@ -1,15 +1,21 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebaseClient";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import "@/lib/firebaseClient"; // garante init do Firebase no client
 
 export default function BuscarPage() {
   const router = useRouter();
 
-  const [userEmail, setUserEmail] = useState("");
-  const [verified, setVerified] = useState(false);
+  // ✅ auth seguro
+  const [user, setUser] = useState(null);
+  const userRef = useRef(null);
+
+  const userEmail = user?.email || "";
+  const verified = !!user?.emailVerified;
+  const isLogged = !!user;
 
   // meu carro
   const [myPlate, setMyPlate] = useState("");
@@ -23,55 +29,92 @@ export default function BuscarPage() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
 
-  // foto placa destino
+  // foto (recorte/zoom)
   const fileInputRef = useRef(null);
   const [destFile, setDestFile] = useState(null);
   const [destPreviewUrl, setDestPreviewUrl] = useState("");
   const [scanning, setScanning] = useState(false);
 
-  // pan/zoom
-  const cropBoxRef = useRef(null);
-  const imgNaturalRef = useRef({ w: 0, h: 0 });
-  const [pan, setPan] = useState({ x: 0, y: 0 }); // px
-  const [zoom, setZoom] = useState(1); // 1..5
+  // crop state
+  const imgRef = useRef(null);
+  const viewRef = useRef(null);
+  const [imgNatural, setImgNatural] = useState({ w: 1, h: 1 });
+  const [view, setView] = useState({
+    tx: 0, // translate x
+    ty: 0, // translate y
+    scale: 1,
+  });
 
-  // pointers (touch/mouse)
-  const pointersRef = useRef(new Map());
-  const gestureRef = useRef({
-    mode: "none",
-    startPan: { x: 0, y: 0 },
-    startZoom: 1,
+  // gesture
+  const pointers = useRef(new Map());
+  const gesture = useRef({
+    startView: null,
     startDist: 0,
     startMid: { x: 0, y: 0 },
   });
 
-  const isLogged = !!auth.currentUser;
+  // ===== styles =====
+  const box = useMemo(
+    () => ({
+      border: "1px solid rgba(255,255,255,0.15)",
+      borderRadius: 14,
+      padding: 16,
+      background: "rgba(255,255,255,0.03)",
+    }),
+    []
+  );
+
+  const label = useMemo(() => ({ marginBottom: 8, opacity: 0.85 }), []);
+
+  const input = useMemo(
+    () => ({
+      width: "100%",
+      padding: "12px 12px",
+      borderRadius: 12,
+      border: "1px solid rgba(255,255,255,0.12)",
+      background: "rgba(255,255,255,0.05)",
+      color: "white",
+      outline: "none",
+    }),
+    []
+  );
+
+  const btn = (primary) => ({
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: primary ? "rgba(255,255,255,0.12)" : "transparent",
+    color: "white",
+    fontWeight: 800,
+    cursor: "pointer",
+    opacity: primary ? 1 : 0.95,
+  });
 
   // ===== helpers =====
   function normPlate(s) {
     return (s || "")
-      .toString()
-      .trim()
       .toUpperCase()
-      .replace(/[^A-Z0-9]/g, "");
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 7);
   }
 
   function splitWhatsapp(full) {
-    const digits = String(full || "").replace(/\D/g, "");
-    if (!digits) return "";
+    const only = (full || "").replace(/\D/g, "");
+    if (!only) return "";
     // remove 55 se tiver
-    return digits.startsWith("55") ? digits.slice(2) : digits;
+    if (only.startsWith("55")) return only.slice(2);
+    return only;
   }
 
   function normWhatsappLocal(local) {
-    const only = String(local || "").replace(/\D/g, "");
+    const only = (local || "").replace(/\D/g, "");
     if (!only) return "";
     return `55${only}`; // salva com 55
   }
 
-  // ✅ pega token NA HORA e manda Authorization certo
+  // ✅ pega token NA HORA e manda Authorization certo (sem usar auth global)
   async function apiFetch(url, options = {}) {
-    const u = auth.currentUser;
+    const u = userRef.current;
     if (!u) throw new Error("Sem token (não logado)");
     const token = await u.getIdToken(true);
 
@@ -86,7 +129,8 @@ export default function BuscarPage() {
 
   async function loadMine() {
     const r = await apiFetch("/api/vehicles/claim?mine=1");
-    const j = await r.json();
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "Falha ao carregar dados");
 
     setMyPlate(j.plate || "");
     setMyWhatsappFull(j.whatsapp || "");
@@ -96,17 +140,19 @@ export default function BuscarPage() {
 
   async function saveMine() {
     const plate = normPlate(newPlate);
-    if (!plate) return alert("Placa obrigatória.");
-
     const whatsapp = normWhatsappLocal(newWhatsappLocal);
+
+    if (!plate) return alert("Placa inválida.");
+    if (!whatsapp || whatsapp.length < 12) return alert("WhatsApp inválido (DDD + número).");
 
     const r = await apiFetch("/api/vehicles/claim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ plate, whatsapp }),
     });
-    const j = await r.json();
-    if (!r.ok) return alert(j.error || "Erro ao salvar.");
+
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return alert(j.error || "Falha ao salvar");
 
     setMyPlate(j.plate || plate);
     setMyWhatsappFull(j.whatsapp || whatsapp);
@@ -118,7 +164,7 @@ export default function BuscarPage() {
     if (!plate) return { ok: false, reason: "Placa vazia" };
 
     const r = await apiFetch(`/api/vehicles/claim?plate=${encodeURIComponent(plate)}`);
-    const j = await r.json();
+    const j = await r.json().catch(() => ({}));
 
     if (!j.exists) return { ok: false, reason: "Essa placa não está cadastrada." };
     return { ok: true };
@@ -145,7 +191,7 @@ export default function BuscarPage() {
         body: JSON.stringify({ fromPlate, toPlate: dest, text: msg }),
       });
 
-      const j = await r.json();
+      const j = await r.json().catch(() => ({}));
       if (!r.ok) return alert(j.error || "Falha ao enviar.");
 
       router.push(`/t/${j.threadId}`);
@@ -158,19 +204,18 @@ export default function BuscarPage() {
 
   // ===== auth listener =====
   useEffect(() => {
+    const auth = getAuth();
     const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u || null);
+      userRef.current = u || null;
+
       if (!u) {
-        setUserEmail("");
-        setVerified(false);
         setMyPlate("");
         setMyWhatsappFull("");
         setNewPlate("");
         setNewWhatsappLocal("");
         return;
       }
-
-      setUserEmail(u.email || "");
-      setVerified(!!u.emailVerified);
 
       try {
         await loadMine();
@@ -189,84 +234,29 @@ export default function BuscarPage() {
     };
   }, [destPreviewUrl]);
 
-  // ===== UI styles =====
-  const box = useMemo(
-    () => ({
-      border: "1px solid rgba(255,255,255,0.15)",
-      background: "rgba(255,255,255,0.04)",
-      borderRadius: 12,
-      padding: 16,
-    }),
-    []
-  );
-
-  const label = { fontWeight: 700, marginBottom: 6 };
-
-  const input = {
-    width: "100%",
-    padding: "12px 12px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.15)",
-    background: "rgba(255,255,255,0.06)",
-    color: "white",
-    outline: "none",
-  };
-
-  const textarea = { ...input, resize: "vertical", minHeight: 140 };
-
-  const btn = (primary = false) => ({
-    padding: "10px 14px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.15)",
-    background: primary ? "rgba(255,255,255,0.12)" : "transparent",
-    color: "white",
-    fontWeight: 700,
-    cursor: "pointer",
-  });
-
-  const smallBadge = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 82,
-    padding: "10px 10px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.15)",
-    background: "rgba(255,255,255,0.06)",
-    fontWeight: 800,
-  };
-
-  // ===== Foto: escolher =====
+  // ====== foto / crop ======
   function pickDestImage() {
-    if (fileInputRef.current) fileInputRef.current.click();
+    fileInputRef.current?.click();
   }
 
   async function onDestFileChange(e) {
     const f = e.target.files?.[0];
     if (!f) return;
-
     setDestFile(f);
+
+    if (destPreviewUrl) URL.revokeObjectURL(destPreviewUrl);
     const url = URL.createObjectURL(f);
     setDestPreviewUrl(url);
 
-    // reset pan/zoom
-    setPan({ x: 0, y: 0 });
-    setZoom(1);
-
-    // pega natural size
-    const img = new Image();
-    img.onload = () => {
-      imgNaturalRef.current = { w: img.width, h: img.height };
-    };
-    img.src = url;
+    // reseta view
+    setView({ tx: 0, ty: 0, scale: 1 });
+    pointers.current.clear();
+    gesture.current = { startView: null, startDist: 0, startMid: { x: 0, y: 0 } };
   }
 
-  // ===== Gestos: pan/zoom com dedo =====
   function getBoxPoint(e) {
-    const el = cropBoxRef.current;
-    if (!el) return { x: 0, y: 0 };
-    const r = el.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    const rect = viewRef.current.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
   function dist(a, b) {
@@ -285,128 +275,112 @@ export default function BuscarPage() {
 
   function onPointerDown(e) {
     if (!destPreviewUrl) return;
+    viewRef.current.setPointerCapture(e.pointerId);
+    pointers.current.set(e.pointerId, getBoxPoint(e));
 
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    const p = getBoxPoint(e);
-    pointersRef.current.set(e.pointerId, p);
-
-    const pts = [...pointersRef.current.values()];
+    const pts = Array.from(pointers.current.values());
     if (pts.length === 1) {
-      gestureRef.current.mode = "pan";
-      gestureRef.current.startPan = { ...pan };
-    } else if (pts.length >= 2) {
-      gestureRef.current.mode = "pinch";
-      gestureRef.current.startZoom = zoom;
-      gestureRef.current.startDist = dist(pts[0], pts[1]);
-      gestureRef.current.startMid = mid(pts[0], pts[1]);
-      gestureRef.current.startPan = { ...pan };
+      gesture.current.startView = { ...view };
+    } else if (pts.length === 2) {
+      gesture.current.startView = { ...view };
+      gesture.current.startDist = dist(pts[0], pts[1]);
+      gesture.current.startMid = mid(pts[0], pts[1]);
     }
   }
 
   function onPointerMove(e) {
     if (!destPreviewUrl) return;
-    if (!pointersRef.current.has(e.pointerId)) return;
+    if (!pointers.current.has(e.pointerId)) return;
 
-    const p = getBoxPoint(e);
-    pointersRef.current.set(e.pointerId, p);
+    pointers.current.set(e.pointerId, getBoxPoint(e));
+    const pts = Array.from(pointers.current.values());
 
-    const pts = [...pointersRef.current.values()];
-    const g = gestureRef.current;
+    if (!gesture.current.startView) gesture.current.startView = { ...view };
 
-    if (g.mode === "pan" && pts.length === 1) {
-      const cur = pts[0];
-      const start = cur; // mesmo ponto (pan simples baseado no movementX/Y não é confiável)
-      // melhor: usa movement (mouse) quando existir, senão faz delta por último:
-      // vamos fazer delta por evento guardando "prev" no map:
-      // (já está atualizado, então pega "movement" do evento quando existir)
-      const dx = e.movementX || 0;
-      const dy = e.movementY || 0;
-      if (dx || dy) setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-    }
-
-    if (g.mode === "pinch" && pts.length >= 2) {
+    if (pts.length === 1) {
+      const p = pts[0];
+      const sp = getBoxPoint(e);
+      // pan baseado em delta do ponteiro atual vs inicial não guardamos; simples: usa movementX/Y
+      setView((v) => ({ ...v, tx: v.tx + e.movementX, ty: v.ty + e.movementY }));
+    } else if (pts.length === 2) {
       const d = dist(pts[0], pts[1]);
       const m = mid(pts[0], pts[1]);
 
-      const ratio = g.startDist ? d / g.startDist : 1;
-      const newZoom = clamp(g.startZoom * ratio, 1, 5);
+      const start = gesture.current.startView;
+      const scale = clamp((start.scale * d) / (gesture.current.startDist || d), 0.5, 6);
 
-      // pan acompanha o movimento do “meio” do pinch
-      const mdx = m.x - g.startMid.x;
-      const mdy = m.y - g.startMid.y;
+      // zoom mantendo centro
+      const dx = m.x - gesture.current.startMid.x;
+      const dy = m.y - gesture.current.startMid.y;
 
-      setZoom(newZoom);
-      setPan({ x: g.startPan.x + mdx, y: g.startPan.y + mdy });
+      setView({
+        scale,
+        tx: start.tx + dx,
+        ty: start.ty + dy,
+      });
     }
   }
 
   function onPointerUp(e) {
-    pointersRef.current.delete(e.pointerId);
-    const pts = [...pointersRef.current.values()];
-    if (pts.length === 0) gestureRef.current.mode = "none";
+    if (!destPreviewUrl) return;
+    pointers.current.delete(e.pointerId);
+
+    const pts = Array.from(pointers.current.values());
+    if (pts.length === 0) {
+      gesture.current.startView = null;
+      gesture.current.startDist = 0;
+    } else if (pts.length === 1) {
+      gesture.current.startView = { ...view };
+    }
   }
 
-  // desktop: wheel zoom
   function onWheel(e) {
     if (!destPreviewUrl) return;
     e.preventDefault();
+
     const delta = e.deltaY;
-    setZoom((z) => clamp(z * (delta > 0 ? 0.92 : 1.08), 1, 5));
+    setView((v) => {
+      const nextScale = clamp(v.scale * (delta > 0 ? 0.95 : 1.05), 0.5, 6);
+      return { ...v, scale: nextScale };
+    });
   }
 
-  // ===== OK: recorta o que está visível e manda pro OCR =====
   async function buildCroppedBlobFromView() {
-    const el = cropBoxRef.current;
-    if (!el) throw new Error("Box não encontrado.");
-    const { w: iw, h: ih } = imgNaturalRef.current;
-    if (!iw || !ih) throw new Error("Imagem ainda carregando.");
+    // cria canvas do recorte baseado na viewBox (a área central visível)
+    const img = imgRef.current;
+    const viewBox = viewRef.current;
+    if (!img || !viewBox) throw new Error("Imagem não carregada");
 
-    const rect = el.getBoundingClientRect();
-    const cw = Math.max(1, Math.round(rect.width));
-    const ch = Math.max(1, Math.round(rect.height));
+    const boxRect = viewBox.getBoundingClientRect();
+    const boxW = boxRect.width;
+    const boxH = boxRect.height;
 
-    // canvas em resolução maior (melhor OCR)
-    const scaleOut = 2;
+    // canvas do tamanho da caixa (o recorte que você “vê”)
     const canvas = document.createElement("canvas");
-    canvas.width = cw * scaleOut;
-    canvas.height = ch * scaleOut;
+    canvas.width = Math.round(boxW);
+    canvas.height = Math.round(boxH);
     const ctx = canvas.getContext("2d");
 
-    // desenha com a mesma lógica do preview:
-    // baseScale = cover
-    const baseScale = Math.max(cw / iw, ch / ih);
-    const baseW = iw * baseScale;
-    const baseH = ih * baseScale;
+    // desenha imagem com transform aplicado
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const finalScale = zoom;
-    const drawW = baseW * finalScale;
-    const drawH = baseH * finalScale;
+    ctx.save();
+    // centro da caixa
+    ctx.translate(canvas.width / 2 + view.tx, canvas.height / 2 + view.ty);
+    ctx.scale(view.scale, view.scale);
+    // desenha imagem centrada
+    ctx.drawImage(img, -imgNatural.w / 2, -imgNatural.h / 2, imgNatural.w, imgNatural.h);
+    ctx.restore();
 
-    const ox = (cw - drawW) / 2 + pan.x;
-    const oy = (ch - drawH) / 2 + pan.y;
-
-    // aplica escala do canvas
-    ctx.scale(scaleOut, scaleOut);
-
-    const img = new Image();
-    img.src = destPreviewUrl;
-    await new Promise((res, rej) => {
-      img.onload = () => res();
-      img.onerror = () => rej(new Error("Falha ao carregar imagem"));
-    });
-
-    ctx.drawImage(img, ox, oy, drawW, drawH);
-
-    const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.92));
-    if (!blob) throw new Error("Falha ao gerar imagem.");
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+    if (!blob) throw new Error("Falha ao gerar imagem");
     return blob;
   }
 
   async function handleOKScan() {
+    if (!destPreviewUrl) return alert("Envie uma foto primeiro.");
     try {
-      if (!isLogged) return alert("Você precisa estar logado.");
-      if (!destPreviewUrl) return alert("Escolha uma foto primeiro.");
-
       setScanning(true);
 
       const blob = await buildCroppedBlobFromView();
@@ -465,160 +439,181 @@ export default function BuscarPage() {
         <div style={{ marginTop: 14 }}>
           <div style={label}>Minha placa</div>
           <input
+            style={input}
             value={editing ? newPlate : myPlate || ""}
             onChange={(e) => setNewPlate(e.target.value)}
             disabled={!editing}
             placeholder="Ex: ABC1234 ou ABC1D23"
-            style={{ ...input, opacity: editing ? 1 : 0.95 }}
           />
+          <div style={{ marginTop: 6, fontSize: 13, opacity: 0.7 }}>
+            (antiga: ABC1234 • Mercosul: ABC1D23)
+          </div>
         </div>
 
-        {/* WhatsApp */}
+        {/* Whats */}
         <div style={{ marginTop: 14 }}>
           <div style={label}>Meu WhatsApp (com DDI, só números)</div>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <div style={smallBadge}>BR +55</div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div
+              style={{
+                padding: "12px 12px",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.05)",
+                fontWeight: 800,
+                minWidth: 78,
+                textAlign: "center",
+              }}
+            >
+              BR +55
+            </div>
+
             <input
-              value={editing ? newWhatsappLocal : splitWhatsapp(myWhatsappFull)}
+              style={input}
+              value={editing ? newWhatsappLocal : splitWhatsapp(myWhatsappFull || "")}
               onChange={(e) => setNewWhatsappLocal(e.target.value)}
               disabled={!editing}
-              placeholder="Ex: 11999999999"
-              style={input}
+              placeholder="11999998888"
             />
           </div>
         </div>
 
         {editing && (
-          <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
+          <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button style={btn(true)} onClick={saveMine} disabled={!isLogged}>
               Salvar
             </button>
-            <button style={btn(false)} onClick={() => setEditing(false)}>
+            <button
+              style={btn(false)}
+              onClick={() => {
+                setEditing(false);
+                setNewPlate(myPlate || "");
+                setNewWhatsappLocal(splitWhatsapp(myWhatsappFull || ""));
+              }}
+            >
               Cancelar
             </button>
           </div>
         )}
       </div>
 
-      {/* Enviar mensagem */}
+      {/* Enviar */}
       <div style={{ marginTop: 18, ...box }}>
-        <h3 style={{ marginTop: 0 }}>Enviar mensagem para outra placa</h3>
+        <b>Enviar mensagem para outra placa</b>
 
-        <div style={{ marginTop: 10 }}>
-          <div style={label}>Placa destino</div>
-
-          <div style={{ display: "flex", gap: 12, alignItems: "stretch", flexWrap: "wrap" }}>
-            {/* Digitar */}
-            <div style={{ flex: "1 1 320px" }}>
-              <input
-                value={toPlate}
-                onChange={(e) => setToPlate(e.target.value)}
-                placeholder="Ex: ABC1234 ou ABC1D23"
-                style={input}
-              />
-              <div style={{ marginTop: 8, opacity: 0.75, fontSize: 12 }}>
-                (antiga: ABC1234 • Mercosul: ABC1D23)
-              </div>
+        <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div>
+            <div style={label}>Placa destino</div>
+            <input
+              style={input}
+              value={toPlate}
+              onChange={(e) => setToPlate(e.target.value)}
+              placeholder="Ex: ABC1234 ou ABC1D23"
+            />
+            <div style={{ marginTop: 6, fontSize: 13, opacity: 0.7 }}>
+              (antiga: ABC1234 • Mercosul: ABC1D23)
             </div>
 
-            {/* Foto da placa (mover/zoom com dedo) */}
-            <div style={{ flex: "0 0 360px" }}>
-              <div
-                style={{
-                  ...box,
-                  padding: 12,
-                  height: "100%",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                }}
-              >
-                <div style={{ fontWeight: 800 }}>Foto da Placa</div>
-                <div style={{ opacity: 0.8, fontSize: 13 }}>
-                  Envie um foto. Depois ajuste com o dedo (mover/zoom) e clique em OK.
-                </div>
+            <div style={{ marginTop: 14 }}>
+              <div style={label}>Mensagem</div>
+              <textarea
+                style={{ ...input, minHeight: 120, resize: "vertical" }}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Escreva a mensagem..."
+              />
+            </div>
 
-                <div
-                  ref={cropBoxRef}
-                  onPointerDown={onPointerDown}
-                  onPointerMove={onPointerMove}
-                  onPointerUp={onPointerUp}
-                  onPointerCancel={onPointerUp}
-                  onWheel={onWheel}
-                  style={{
-                    width: "100%",
-                    height: 170,
-                    borderRadius: 12,
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    overflow: "hidden",
-                    background: "rgba(255,255,255,0.03)",
-                    position: "relative",
-                    touchAction: "none", // ✅ permite pinch/drag no mobile
-                    userSelect: "none",
+            <div style={{ marginTop: 14 }}>
+              <button style={btn(true)} onClick={sendAndOpenChat} disabled={!isLogged || sending}>
+                {sending ? "Enviando..." : "Enviar"}
+              </button>
+            </div>
+          </div>
+
+          {/* Foto */}
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Foto da Placa</div>
+            <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 10 }}>
+              Envie uma foto. Depois ajuste com o dedo (mover/zoom) e clique em OK.
+            </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+              <button style={btn(false)} onClick={pickDestImage} disabled={!isLogged}>
+                Escolher foto
+              </button>
+              <button style={btn(true)} onClick={handleOKScan} disabled={!isLogged || scanning || !destPreviewUrl}>
+                {scanning ? "Lendo..." : "OK"}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={onDestFileChange}
+              />
+            </div>
+
+            <div
+              ref={viewRef}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+              onWheel={onWheel}
+              style={{
+                width: "100%",
+                height: 260,
+                borderRadius: 14,
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.04)",
+                overflow: "hidden",
+                position: "relative",
+                touchAction: "none",
+              }}
+            >
+              {!destPreviewUrl && (
+                <div style={{ opacity: 0.7, padding: 14 }}>Envie uma foto.</div>
+              )}
+
+              {destPreviewUrl && (
+                <img
+                  ref={imgRef}
+                  src={destPreviewUrl}
+                  alt="foto"
+                  onLoad={(e) => {
+                    const img = e.currentTarget;
+                    // natural size
+                    const w = img.naturalWidth || 1;
+                    const h = img.naturalHeight || 1;
+                    setImgNatural({ w, h });
+
+                    // centraliza
+                    setView({ tx: 0, ty: 0, scale: 1 });
                   }}
-                >
-                  {destPreviewUrl ? (
-                    <img
-                      src={destPreviewUrl}
-                      alt="Prévia"
-                      draggable={false}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                        transformOrigin: "center center",
-                        pointerEvents: "none",
-                      }}
-                    />
-                  ) : (
-                    <div style={{ padding: 12, opacity: 0.75 }}>Envie um foto.</div>
-                  )}
-                </div>
-
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button style={btn(false)} onClick={pickDestImage} disabled={!isLogged || scanning}>
-                    Escolher foto
-                  </button>
-                  <button
-                    style={btn(true)}
-                    onClick={handleOKScan}
-                    disabled={!isLogged || scanning || !destPreviewUrl}
-                    title="Recorta o que está aparecendo e lê a placa"
-                  >
-                    {scanning ? "Lendo..." : "OK"}
-                  </button>
-
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={onDestFileChange}
-                    style={{ display: "none" }}
-                  />
-                </div>
-              </div>
+                  style={{
+                    position: "absolute",
+                    left: "50%",
+                    top: "50%",
+                    transform: `translate(calc(-50% + ${view.tx}px), calc(-50% + ${view.ty}px)) scale(${view.scale})`,
+                    transformOrigin: "center center",
+                    maxWidth: "none",
+                    maxHeight: "none",
+                    userSelect: "none",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>
-
-        {/* mensagem */}
-        <div style={{ marginTop: 14 }}>
-          <div style={label}>Mensagem</div>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Digite sua mensagem..."
-            style={textarea}
-          />
-        </div>
-
-        <div style={{ marginTop: 14 }}>
-          <button style={btn(true)} onClick={sendAndOpenChat} disabled={sending || !isLogged}>
-            {sending ? "Enviando..." : "Enviar e abrir chat"}
-          </button>
-        </div>
       </div>
+
+      {!verified && isLogged && (
+        <div style={{ marginTop: 14, color: "#ffb" }}>
+          Seu email ainda não está verificado. Vá em <b>Login</b> e confirme.
+        </div>
+      )}
     </div>
   );
 }
