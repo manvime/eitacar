@@ -1,4 +1,3 @@
-
 "use client";
 
 import Link from "next/link";
@@ -7,8 +6,8 @@ import { useEffect, useState } from "react";
 import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
 import "@/lib/firebaseClient";
 
-// ✅ IMPORTA O BOX
-import PushClient from "@/components/PushClient";
+// ✅ Import relativo (porque está em app/components)
+import PushClient from "./PushClient";
 
 export default function TopNav() {
   const pathname = usePathname();
@@ -93,8 +92,8 @@ export default function TopNav() {
 
       <div style={{ height: 1, background: "rgba(255,255,255,0.12)" }} />
 
-      {/* ✅ AQUI APARECE O BOX */}
-      {canAccessPrivate && (
+      {/* ✅ BOX DAS NOTIFICAÇÕES */}
+      {isLoggedIn && (
         <div style={{ padding: "0 12px 12px 12px" }}>
           <PushClient />
         </div>

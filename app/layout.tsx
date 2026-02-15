@@ -6,12 +6,15 @@ export const metadata = {
   description: "eitaCar",
   viewport: {
     width: "device-width",
-    initialScale: 2,
-    maximumScale: 2,
+    initialScale: 1,
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="pt-BR">
       <body style={{ margin: 0, background: "#000", color: "#fff" }}>

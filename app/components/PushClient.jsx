@@ -6,7 +6,7 @@ import "@/lib/firebaseClient";
 
 const VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_KEY || "";
 
-// lembrar escolha do usuário
+// lembrar escolha do usuário no navegador
 const LS_OPTIN = "push_opt_in";
 const LS_TOKEN = "push_fcm_token";
 
@@ -28,6 +28,7 @@ export default function PushClient() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // pega usuário e optIn salvo
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOptIn(localStorage.getItem(LS_OPTIN) === "1");
@@ -68,7 +69,7 @@ export default function PushClient() {
         return;
       }
 
-      // pede permissão só no clique
+      // pede permissão só quando o usuário clicar
       if (Notification.permission !== "granted") {
         const perm = await Notification.requestPermission();
         if (perm !== "granted") {
@@ -79,7 +80,7 @@ export default function PushClient() {
 
       const swReg = await ensureServiceWorker();
       if (!swReg) {
-        setStatus("Falha no Service Worker. Verifique /firebase-messaging-sw.js (200).");
+        setStatus("Falha no Service Worker. Confira /firebase-messaging-sw.js (200).");
         return;
       }
 
@@ -129,9 +130,11 @@ export default function PushClient() {
       setBusy(true);
       setStatus("");
 
+      // opt-out local
       localStorage.setItem(LS_OPTIN, "0");
       setOptIn(false);
 
+      // remove token do banco para parar de receber
       const token = localStorage.getItem(LS_TOKEN) || "";
       localStorage.removeItem(LS_TOKEN);
 
