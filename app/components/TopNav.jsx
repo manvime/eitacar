@@ -83,7 +83,7 @@ export default function TopNav() {
 
         <div style={{ flex: 1 }} />
 
-        {canAccessPrivate && (
+        {isLoggedIn && (
           <button onClick={handleLogout} style={btnStyle(false)}>
             Sair
           </button>
