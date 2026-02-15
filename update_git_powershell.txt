@@ -31,3 +31,5 @@ git status
 git add .
 git commit -m "Push web real + fix firebase init + pages"
 git push
+
+Get-ChildItem . -Recurse -File | Select-String -Pattern "Ative para receber alertas" -SimpleMatch
