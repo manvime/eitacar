@@ -10,17 +10,21 @@ export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
 
+  const [authReady, setAuthReady] = useState(false);
   const [userEmail, setUserEmail] = useState("");
+
   const adminEmail = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "").toLowerCase();
 
   useEffect(() => {
     const auth = getAuth();
     return onAuthStateChanged(auth, (u) => {
       setUserEmail((u?.email || "").toLowerCase());
+      setAuthReady(true);
     });
   }, []);
 
   const isLogged = useMemo(() => !!userEmail, [userEmail]);
+  const isAdmin = useMemo(() => !!adminEmail && userEmail === adminEmail, [adminEmail, userEmail]);
 
   const isActive = (href) => pathname === href;
 
@@ -31,56 +35,46 @@ export default function TopNav() {
     background: active ? "rgba(255,255,255,0.12)" : "transparent",
     color: "white",
     textDecoration: "none",
-    fontWeight: 600,
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
+    fontWeight: 700,
+    fontSize: 15,
   });
-
-  const btnGhost = {
-    padding: "8px 14px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.15)",
-    background: "transparent",
-    color: "white",
-    fontWeight: 600,
-    cursor: "pointer",
-  };
 
   async function handleLogout() {
     try {
-      const auth = getAuth();
-      await signOut(auth);
-      router.push("/"); // volta pra home
-    } catch (e) {
-      console.error(e);
+      await signOut(getAuth());
+    } finally {
+      router.push("/login");
+      router.refresh();
     }
   }
 
+  // "Sair do site": navegador normalmente NÃO deixa fechar aba/janela se não foi aberta via script.
+  // Então o "Sair" aqui é o logout + ir para /login (mais seguro e esperado).
+  // Se você quiser “sair do site” mesmo, pode trocar por: window.location.href = "about:blank";
+  const showRightButton = authReady && isLogged; // só mostra botão à direita quando estiver logado
+
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 50, background: "#000" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 12 }}>
-        {/* Marca */}
-        <Link
-          href="/"
-          style={{
-            fontWeight: 800,
-            color: "white",
-            marginRight: 10,
-            textDecoration: "none",
-            letterSpacing: 0.2,
-          }}
-        >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ fontWeight: 900, color: "white", marginRight: 10, fontSize: 18 }}>
           eitaCar
-        </Link>
+        </div>
 
-        {/* Sempre aparece */}
+        {/* Login sempre visível */}
         <Link href="/login" style={btnStyle(isActive("/login"))}>
           Login
         </Link>
 
-        {/* Só aparece quando estiver logado */}
-        {isLogged && (
+        {/* Só aparece depois que estiver logado */}
+        {authReady && isLogged && (
           <>
             <Link href="/perfil" style={btnStyle(isActive("/perfil"))}>
               Perfil
@@ -93,7 +87,7 @@ export default function TopNav() {
             </Link>
 
             {/* Admin só aparece pro email admin */}
-            {adminEmail && userEmail === adminEmail && (
+            {isAdmin && (
               <Link href="/admin" style={btnStyle(isActive("/admin"))}>
                 Admin
               </Link>
@@ -103,14 +97,22 @@ export default function TopNav() {
 
         <div style={{ flex: 1 }} />
 
-        {/* Direita */}
-        {isLogged ? (
-          <button onClick={handleLogout} style={btnGhost}>
+        {/* Em vez de Voltar: Sair (somente logado) */}
+        {showRightButton && (
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.15)",
+              background: "rgba(255,255,255,0.06)",
+              color: "white",
+              fontWeight: 800,
+              cursor: "pointer",
+              fontSize: 15,
+            }}
+          >
             Sair
-          </button>
-        ) : (
-          <button onClick={() => router.back()} style={btnGhost}>
-            Voltar
           </button>
         )}
       </div>
@@ -119,5 +121,4 @@ export default function TopNav() {
     </div>
   );
 }
-
 
