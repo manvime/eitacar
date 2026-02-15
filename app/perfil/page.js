@@ -16,11 +16,8 @@ import {
 function onlyDigits(v) {
   return (v || "").replace(/\D+/g, "");
 }
-
-// Placa BR: antiga ABC1234 ou Mercosul ABC1D23
 function normalizePlate(input) {
-  const v = (input || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return v.slice(0, 7);
+  return (input || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7);
 }
 
 export default function PerfilPage() {
@@ -32,15 +29,17 @@ export default function PerfilPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // ===== Push REAL =====
+  // ===== Push (somente aqui no perfil) =====
   const [pushSupported, setPushSupported] = useState(false);
   const [pushPerm, setPushPerm] = useState("default"); // default | granted | denied | unsupported
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [pushMsg, setPushMsg] = useState("");   // sucesso/info
+  const [pushErr, setPushErr] = useState("");   // erro detalhado
 
   const [form, setForm] = useState({
     placa: "",
-    whatsapp: "", // só números, sem +55
+    whatsapp: "",
     ano: "",
     cor: "",
     modelo: "",
@@ -58,7 +57,7 @@ export default function PerfilPage() {
     return () => unsub();
   }, []);
 
-  // ===== Push state init =====
+  // ===== Push init =====
   useEffect(() => {
     (async () => {
       const ok = await pushIsSupported();
@@ -67,7 +66,6 @@ export default function PerfilPage() {
       const p = getNotificationPermission();
       setPushPerm(p === "unsupported" ? "unsupported" : p);
 
-      // nosso enable() salva em localStorage("fcmToken")
       try {
         setPushEnabled(!!localStorage.getItem("fcmToken"));
       } catch {
@@ -84,7 +82,6 @@ export default function PerfilPage() {
       router.push("/login");
       return;
     }
-
     if (!user.emailVerified) {
       router.push("/login");
       return;
@@ -125,9 +122,7 @@ export default function PerfilPage() {
       background: "rgba(255,255,255,0.02)",
       color: "white",
     };
-
     const label = { display: "block", marginBottom: 6, opacity: 0.9 };
-
     const input = {
       width: "100%",
       padding: "12px 12px",
@@ -137,41 +132,29 @@ export default function PerfilPage() {
       color: "white",
       outline: "none",
     };
-
-    const row = {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: 12,
-    };
-
-    const row3 = {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr 1fr",
-      gap: 12,
-    };
-
+    const row = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
+    const row3 = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 };
     const btn = (variant = "primary") => ({
       padding: "10px 14px",
       borderRadius: 10,
       border: "1px solid rgba(255,255,255,0.15)",
       background: variant === "primary" ? "rgba(255,255,255,0.12)" : "transparent",
       color: "white",
-      fontWeight: 700,
+      fontWeight: 800,
       cursor: "pointer",
       minWidth: 140,
       opacity: variant === "disabled" ? 0.6 : 1,
     });
-
     const help = { marginTop: 6, opacity: 0.75, fontSize: 13 };
-
     const box = {
       border: "1px solid rgba(255,255,255,0.12)",
       borderRadius: 12,
       padding: 12,
       background: "rgba(255,255,255,0.03)",
     };
-
-    return { card, label, input, row, row3, btn, help, box };
+    const msgOk = { marginTop: 10, padding: 10, borderRadius: 10, background: "rgba(0,255,0,0.08)", border: "1px solid rgba(0,255,0,0.15)" };
+    const msgErr = { marginTop: 10, padding: 10, borderRadius: 10, background: "rgba(255,0,0,0.08)", border: "1px solid rgba(255,0,0,0.15)" };
+    return { card, label, input, row, row3, btn, help, box, msgOk, msgErr };
   }, []);
 
   function setField(name, value) {
@@ -198,7 +181,6 @@ export default function PerfilPage() {
         {
           uid: user.uid,
           email: (user.email || "").toLowerCase(),
-
           placa,
           whatsapp,
           ano: form.ano,
@@ -206,7 +188,6 @@ export default function PerfilPage() {
           modelo: form.modelo,
           endereco: form.endereco,
           cep,
-
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -220,17 +201,23 @@ export default function PerfilPage() {
     }
   }
 
-  // ===== Push actions =====
+  // ===== Push actions (com mensagens/erros) =====
   async function handleEnablePush() {
     if (!user) return alert("Faça login primeiro.");
+
+    setPushMsg("");
+    setPushErr("");
+
     try {
       setPushBusy(true);
-      await enablePushAndSaveToken(); // salva no servidor e grava localStorage("fcmToken")
+      const token = await enablePushAndSaveToken(); // pede permissão + pega token + POST /api/push/saveToken
       setPushPerm(getNotificationPermission());
       setPushEnabled(true);
-      alert("Notificações ATIVADAS ✅");
+      setPushMsg(`Ativado ✅ Token salvo (${String(token).slice(0, 12)}...)`);
     } catch (e) {
-      alert(e?.message || "Falha ao ativar notificações.");
+      setPushPerm(getNotificationPermission());
+      setPushEnabled(!!localStorage.getItem("fcmToken"));
+      setPushErr(e?.message || "Falha ao ativar notificações.");
     } finally {
       setPushBusy(false);
     }
@@ -238,25 +225,27 @@ export default function PerfilPage() {
 
   async function handleDisablePush() {
     if (!user) return alert("Faça login primeiro.");
+
+    setPushMsg("");
+    setPushErr("");
+
     try {
       setPushBusy(true);
-      await disablePushAndDeleteToken({ unregisterServiceWorker: false }); // chama DELETE no servidor
+      await disablePushAndDeleteToken({ unregisterServiceWorker: false }); // deleteToken + DELETE /api/push/saveToken
       setPushPerm(getNotificationPermission());
       setPushEnabled(false);
-      alert("Notificações DESATIVADAS ✅");
+      setPushMsg("Desativado ✅ Token removido");
     } catch (e) {
-      alert(e?.message || "Falha ao desativar notificações.");
+      setPushPerm(getNotificationPermission());
+      setPushEnabled(!!localStorage.getItem("fcmToken"));
+      setPushErr(e?.message || "Falha ao desativar notificações.");
     } finally {
       setPushBusy(false);
     }
   }
 
   if (authState.loading || loading) {
-    return (
-      <div style={{ padding: 24, color: "white", opacity: 0.85 }}>
-        Carregando...
-      </div>
-    );
+    return <div style={{ padding: 24, color: "white", opacity: 0.85 }}>Carregando...</div>;
   }
 
   return (
@@ -264,12 +253,14 @@ export default function PerfilPage() {
       <h2 style={{ marginTop: 0 }}>Perfil</h2>
       <div style={{ opacity: 0.8, marginBottom: 14 }}>Preencha os dados do seu carro.</div>
 
-      {/* ===== Box Notificações (BOTÃO REAL) ===== */}
+      {/* ===== Notificações (SÓ no perfil) ===== */}
       <div style={{ ...styles.box, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
           <div>
-            <div style={{ fontWeight: 800 }}>Notificações</div>
-            <div style={{ opacity: 0.75, fontSize: 13 }}>
+            <div style={{ fontWeight: 900, fontSize: 18 }}>Notificações</div>
+
+            {/* aqui NÃO tem mais o texto "Ative para receber alertas..." */}
+            <div style={{ opacity: 0.75, fontSize: 13, marginTop: 4 }}>
               Suporte: <b>{pushSupported ? "SIM" : "NÃO"}</b> • Permissão: <b>{pushPerm}</b> • Status:{" "}
               <b>{pushEnabled ? "Ativado" : "Desativado"}</b>
             </div>
@@ -277,19 +268,11 @@ export default function PerfilPage() {
 
           {pushSupported ? (
             pushEnabled ? (
-              <button
-                style={styles.btn(pushBusy ? "disabled" : "primary")}
-                disabled={pushBusy}
-                onClick={handleDisablePush}
-              >
+              <button style={styles.btn(pushBusy ? "disabled" : "primary")} disabled={pushBusy} onClick={handleDisablePush}>
                 {pushBusy ? "Aguarde..." : "Desativar"}
               </button>
             ) : (
-              <button
-                style={styles.btn(pushBusy ? "disabled" : "primary")}
-                disabled={pushBusy}
-                onClick={handleEnablePush}
-              >
+              <button style={styles.btn(pushBusy ? "disabled" : "primary")} disabled={pushBusy} onClick={handleEnablePush}>
                 {pushBusy ? "Aguarde..." : "Ativar"}
               </button>
             )
@@ -302,9 +285,12 @@ export default function PerfilPage() {
 
         {pushPerm === "denied" && (
           <div style={{ marginTop: 10, color: "#ffb", fontSize: 13 }}>
-            Seu navegador bloqueou notificações. Clique no cadeado do site → Permissões → Notificações → Permitir.
+            Bloqueado no navegador. Clique no cadeado do site → Permissões → Notificações → Permitir.
           </div>
         )}
+
+        {pushMsg && <div style={styles.msgOk}>{pushMsg}</div>}
+        {pushErr && <div style={styles.msgErr}><b>Erro:</b> {pushErr}</div>}
       </div>
 
       {/* ===== Form ===== */}
@@ -323,7 +309,15 @@ export default function PerfilPage() {
         <div>
           <label style={styles.label}>WhatsApp (DDD + número, só números)</label>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <div style={{ padding: "12px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", fontWeight: 800 }}>
+            <div
+              style={{
+                padding: "12px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.15)",
+                background: "rgba(255,255,255,0.06)",
+                fontWeight: 900,
+              }}
+            >
               BR +55
             </div>
             <input
