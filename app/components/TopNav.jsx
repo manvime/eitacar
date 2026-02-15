@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -6,7 +7,7 @@ import { useEffect, useState } from "react";
 import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
 import "@/lib/firebaseClient";
 
-// ✅ ADICIONADO
+// ✅ IMPORTA O BOX
 import PushClient from "@/components/PushClient";
 
 export default function TopNav() {
@@ -92,9 +93,12 @@ export default function TopNav() {
 
       <div style={{ height: 1, background: "rgba(255,255,255,0.12)" }} />
 
-      {/* ✅ BOX para permitir/desativar push */}
-      {canAccessPrivate && <div style={{ padding: "0 12px 12px 12px" }}><PushClient /></div>}
+      {/* ✅ AQUI APARECE O BOX */}
+      {canAccessPrivate && (
+        <div style={{ padding: "0 12px 12px 12px" }}>
+          <PushClient />
+        </div>
+      )}
     </div>
   );
 }
-

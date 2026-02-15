@@ -6,7 +6,7 @@ import "@/lib/firebaseClient";
 
 const VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_KEY || "";
 
-// chave local pra lembrar se o usuário quer notificações
+// lembrar escolha do usuário
 const LS_OPTIN = "push_opt_in";
 const LS_TOKEN = "push_fcm_token";
 
@@ -28,12 +28,6 @@ export default function PushClient() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const permission = useMemo(() => {
-    if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
-    return Notification.permission; // 'default' | 'granted' | 'denied'
-  }, [status]); // status força reavaliação após ações
-
-  // carrega opt-in salvo + user auth
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOptIn(localStorage.getItem(LS_OPTIN) === "1");
@@ -41,6 +35,13 @@ export default function PushClient() {
     const auth = getAuth();
     return onAuthStateChanged(auth, (u) => setUser(u || null));
   }, []);
+
+  const permissionLabel = useMemo(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return "não suportado";
+    if (Notification.permission === "granted") return "permitido";
+    if (Notification.permission === "denied") return "bloqueado";
+    return "ainda não escolhido";
+  }, [status]);
 
   async function enablePush() {
     try {
@@ -63,7 +64,7 @@ export default function PushClient() {
       }
 
       if (Notification.permission === "denied") {
-        setStatus("Notificações bloqueadas no navegador. Libere nas permissões do site.");
+        setStatus("Notificações bloqueadas. Libere nas permissões do site.");
         return;
       }
 
@@ -78,7 +79,7 @@ export default function PushClient() {
 
       const swReg = await ensureServiceWorker();
       if (!swReg) {
-        setStatus("Falha ao registrar SW. Confira se /firebase-messaging-sw.js abre (200).");
+        setStatus("Falha no Service Worker. Verifique /firebase-messaging-sw.js (200).");
         return;
       }
 
@@ -111,14 +112,13 @@ export default function PushClient() {
         return;
       }
 
-      // marca opt-in e salva token local pra facilitar desativar
       localStorage.setItem(LS_OPTIN, "1");
       localStorage.setItem(LS_TOKEN, token);
       setOptIn(true);
       setStatus("Notificações ativadas ✅");
     } catch (e) {
       console.error(e);
-      setStatus("Erro ao ativar notificações (veja o console).");
+      setStatus("Erro ao ativar (veja o console).");
     } finally {
       setBusy(false);
     }
@@ -132,7 +132,6 @@ export default function PushClient() {
       localStorage.setItem(LS_OPTIN, "0");
       setOptIn(false);
 
-      // remove token do banco (para parar de receber)
       const token = localStorage.getItem(LS_TOKEN) || "";
       localStorage.removeItem(LS_TOKEN);
 
@@ -154,13 +153,12 @@ export default function PushClient() {
       setStatus("Notificações desativadas.");
     } catch (e) {
       console.error(e);
-      setStatus("Erro ao desativar (mas opt-out foi aplicado).");
+      setStatus("Erro ao desativar (mas já desligou).");
     } finally {
       setBusy(false);
     }
   }
 
-  // UI do box
   return (
     <div
       style={{
@@ -176,57 +174,46 @@ export default function PushClient() {
         <div>
           <div style={{ fontWeight: 800, marginBottom: 4 }}>Notificações</div>
           <div style={{ fontSize: 13, opacity: 0.85 }}>
-            Receba alertas quando chegar uma nova mensagem no sistema.
+            Ative para receber alertas quando chegar mensagem.
           </div>
           <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
-            Permissão do navegador:{" "}
-            <b>
-              {permission === "unsupported"
-                ? "não suportado"
-                : permission === "granted"
-                ? "permitido"
-                : permission === "denied"
-                ? "bloqueado"
-                : "ainda não escolhido"}
-            </b>
+            Permissão do navegador: <b>{permissionLabel}</b>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10 }}>
-          {!optIn ? (
-            <button
-              onClick={enablePush}
-              disabled={busy}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.18)",
-                background: "rgba(255,255,255,0.12)",
-                color: "white",
-                cursor: busy ? "not-allowed" : "pointer",
-                fontWeight: 700,
-              }}
-            >
-              {busy ? "Ativando..." : "Ativar"}
-            </button>
-          ) : (
-            <button
-              onClick={disablePush}
-              disabled={busy}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.18)",
-                background: "transparent",
-                color: "white",
-                cursor: busy ? "not-allowed" : "pointer",
-                fontWeight: 700,
-              }}
-            >
-              {busy ? "Desativando..." : "Desativar"}
-            </button>
-          )}
-        </div>
+        {!optIn ? (
+          <button
+            onClick={enablePush}
+            disabled={busy}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.12)",
+              color: "white",
+              cursor: busy ? "not-allowed" : "pointer",
+              fontWeight: 700,
+            }}
+          >
+            {busy ? "Ativando..." : "Ativar"}
+          </button>
+        ) : (
+          <button
+            onClick={disablePush}
+            disabled={busy}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "transparent",
+              color: "white",
+              cursor: busy ? "not-allowed" : "pointer",
+              fontWeight: 700,
+            }}
+          >
+            {busy ? "Desativando..." : "Desativar"}
+          </button>
+        )}
       </div>
 
       {status ? <div style={{ marginTop: 10, fontSize: 13, opacity: 0.9 }}>{status}</div> : null}
