@@ -3,12 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-import {
-  doc,
-  getDoc,
-  setDoc,
-  serverTimestamp,
-} from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import "@/lib/firebaseClient";
 import { db } from "@/lib/firebaseClient";
 
@@ -31,6 +26,9 @@ export default function PerfilPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // ✅ UI do toggle (sem push ainda)
+  const [pushEnabled, setPushEnabled] = useState(false);
+
   const [form, setForm] = useState({
     placa: "",
     whatsapp: "", // só números, sem +55
@@ -43,6 +41,7 @@ export default function PerfilPage() {
 
   const canAccess = !!user && !!user.emailVerified;
 
+  // auth
   useEffect(() => {
     const auth = getAuth();
     return onAuthStateChanged(auth, (u) => {
@@ -50,6 +49,15 @@ export default function PerfilPage() {
     });
   }, []);
 
+  // carrega preferencia local do botão (apenas UI)
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("push_enabled");
+      setPushEnabled(v === "1");
+    } catch {}
+  }, []);
+
+  // carrega perfil
   useEffect(() => {
     if (authState.loading) return;
 
@@ -65,7 +73,6 @@ export default function PerfilPage() {
       return;
     }
 
-    // Carregar perfil
     (async () => {
       try {
         setLoading(true);
@@ -140,11 +147,25 @@ export default function PerfilPage() {
 
     const help = { marginTop: 6, opacity: 0.75, fontSize: 13 };
 
-    return { card, label, input, row, row3, btn, help };
+    const box = {
+      border: "1px solid rgba(255,255,255,0.12)",
+      borderRadius: 12,
+      padding: 12,
+      background: "rgba(255,255,255,0.03)",
+    };
+
+    return { card, label, input, row, row3, btn, help, box };
   }, []);
 
   function setField(name, value) {
     setForm((p) => ({ ...p, [name]: value }));
+  }
+
+  function setPushLocal(next) {
+    setPushEnabled(next);
+    try {
+      localStorage.setItem("push_enabled", next ? "1" : "0");
+    } catch {}
   }
 
   async function handleSave() {
@@ -205,6 +226,37 @@ export default function PerfilPage() {
         <div style={{ opacity: 0.75, marginBottom: 18 }}>
           Preencha os dados do seu carro.
         </div>
+
+        {/* ✅ BOX: NOTIFICAÇÕES (só UI por enquanto) */}
+        <div style={styles.box}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Notificações</div>
+          <div style={{ opacity: 0.8, fontSize: 13, marginBottom: 10 }}>
+            Status: <b>{pushEnabled ? "ATIVADAS" : "DESATIVADAS"}</b> (ainda sem função — só botão)
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => setPushLocal(true)}
+              style={{
+                ...styles.btn("primary"),
+                opacity: pushEnabled ? 0.85 : 1,
+              }}
+            >
+              Ativar
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPushLocal(false)}
+              style={styles.btn("ghost")}
+            >
+              Desativar
+            </button>
+          </div>
+        </div>
+
+        <div style={{ height: 16 }} />
 
         <div style={styles.row}>
           <div>
@@ -330,10 +382,7 @@ export default function PerfilPage() {
             {saving ? "Salvando..." : "Salvar"}
           </button>
 
-          <button
-            onClick={() => router.push("/buscar")}
-            style={styles.btn("ghost")}
-          >
+          <button onClick={() => router.push("/buscar")} style={styles.btn("ghost")}>
             Ir para Buscar
           </button>
         </div>
