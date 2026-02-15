@@ -2,7 +2,7 @@
 importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js");
 
-// ⚠️ COLE AQUI SEUS DADOS DO FIREBASE (os mesmos do NEXT_PUBLIC_*)
+// Seus dados do Firebase (os mesmos do NEXT_PUBLIC_*)
 firebase.initializeApp({
   apiKey: "AIzaSyCbEaJmvlb9dcVshEuKdqk_q_tpN-VZTOwI",
   authDomain: "ocramfire.firebaseapp.com",
@@ -14,14 +14,16 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// push em background (app fechado)
+// Background push (app fechado)
 messaging.onBackgroundMessage((payload) => {
   const title = payload?.notification?.title || "Nova mensagem";
   const options = {
     body: payload?.notification?.body || "",
-    icon: "/icons/icon-192.png", // se tiver
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
     data: payload?.data || {},
   };
+
   self.registration.showNotification(title, options);
 });
 
@@ -32,11 +34,20 @@ self.addEventListener("notificationclick", (event) => {
   const url = threadId ? `/t/${threadId}` : `/chats`;
 
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if ("focus" in client) return client.focus();
+    (async () => {
+      const allClients = await clients.matchAll({ type: "window", includeUncontrolled: true });
+
+      // se já tem uma aba aberta, foca e navega
+      for (const client of allClients) {
+        try {
+          if ("focus" in client) await client.focus();
+          if ("navigate" in client) await client.navigate(url);
+          return;
+        } catch {}
       }
+
+      // senão abre nova
       if (clients.openWindow) return clients.openWindow(url);
-    })
+    })()
   );
 });

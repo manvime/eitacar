@@ -1,42 +1,55 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getAuth } from "firebase/auth";
-import "@/lib/firebaseClient";
+import { useEffect, useRef, useState } from "react";
+import "@/lib/firebaseClient"; // garante que firebaseClient inicialize
+import { getAuth, onAuthStateChanged } from "firebase/auth";
 
-const VAPID_KEY =
-  "BCeYvN58J-OAWWp2fBjXQOkdRT6f2mEjQ0VET8-IrgOPPORZwgXl_lNiBP6vBvg6AGF0RGgrbiB8BTtUbeFaL5c";
+const VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_KEY || "";
 
-async function registerServiceWorker() {
+// registra/pega service worker
+async function ensureServiceWorker() {
   if (!("serviceWorker" in navigator)) return null;
-  const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
-  return reg;
+
+  try {
+    const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+    await navigator.serviceWorker.ready;
+    return reg;
+  } catch (err) {
+    console.error("Service Worker register error:", err);
+    return null;
+  }
 }
 
 export default function PushClient() {
   const [status, setStatus] = useState("");
+  const startedRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    const auth = getAuth();
 
-    async function run() {
+    const unsub = onAuthStateChanged(auth, async (user) => {
       try {
-        const auth = getAuth();
-        const user = auth.currentUser;
-        if (!user) return; // só roda logado
+        if (!user) {
+          setStatus("");
+          startedRef.current = false;
+          return;
+        }
+
+        // evita rodar 2x em re-render
+        if (startedRef.current) return;
+        startedRef.current = true;
 
         if (!("Notification" in window)) {
           setStatus("Navegador não suporta notificações.");
           return;
         }
 
-        // Se já negou, não adianta insistir
         if (Notification.permission === "denied") {
-          setStatus("Notificações bloqueadas no navegador.");
+          setStatus("Notificações bloqueadas no navegador (perm. DENIED).");
           return;
         }
 
-        // Pede permissão (se ainda não deu)
+        // pedir permissão
         if (Notification.permission !== "granted") {
           const perm = await Notification.requestPermission();
           if (perm !== "granted") {
@@ -45,26 +58,34 @@ export default function PushClient() {
           }
         }
 
-        const reg = await registerServiceWorker();
-        if (!reg) {
-          setStatus("Service Worker não disponível.");
+        // garantir SW
+        const swReg = await ensureServiceWorker();
+        if (!swReg) {
+          setStatus("Falha ao registrar SW. Verifique /firebase-messaging-sw.js (404?).");
           return;
         }
 
-        // Importa só no client
-        const { getMessaging, getToken } = await import("firebase/messaging");
+        if (!VAPID_KEY) {
+          setStatus("Faltou NEXT_PUBLIC_VAPID_KEY no .env.local");
+          return;
+        }
 
+        // firebase messaging
+        const { getMessaging, getToken, onMessage } = await import("firebase/messaging");
         const messaging = getMessaging();
+
+        // pega token FCM
         const token = await getToken(messaging, {
           vapidKey: VAPID_KEY,
-          serviceWorkerRegistration: reg,
+          serviceWorkerRegistration: swReg,
         });
 
         if (!token) {
-          setStatus("Não foi possível gerar token de push.");
+          setStatus("Não consegui gerar token de push (getToken retornou vazio).");
           return;
         }
 
+        // salva token no backend
         const idToken = await user.getIdToken();
 
         const resp = await fetch("/api/push/saveToken", {
@@ -75,8 +96,7 @@ export default function PushClient() {
           },
           body: JSON.stringify({
             token,
-            platform: "web",
-            userAgent: navigator.userAgent,
+            device: "web",
           }),
         });
 
@@ -86,21 +106,43 @@ export default function PushClient() {
           return;
         }
 
-        if (!cancelled) setStatus("Notificações ativadas ✅");
-      } catch (e) {
-        if (!cancelled) setStatus("Erro ativando notificações.");
-        console.error(e);
-      }
-    }
+        setStatus("Notificações ativadas ✅");
 
-    run();
-    return () => {
-      cancelled = true;
-    };
+        // foreground: quando o app está aberto
+        onMessage(messaging, (payload) => {
+          try {
+            const title = payload?.notification?.title || "Nova mensagem";
+            const body = payload?.notification?.body || "";
+            const threadId = payload?.data?.threadId;
+
+            // mostra notificação mesmo em foreground (opcional)
+            if (Notification.permission === "granted") {
+              const n = new Notification(title, {
+                body,
+                icon: "/icons/icon-192.png",
+                data: { threadId },
+              });
+
+              n.onclick = () => {
+                const url = threadId ? `/t/${threadId}` : `/chats`;
+                window.focus();
+                window.location.href = url;
+              };
+            }
+          } catch (e) {
+            console.error("onMessage error:", e);
+          }
+        });
+      } catch (e) {
+        console.error(e);
+        setStatus("Erro ativando notificações (veja console).");
+      }
+    });
+
+    return () => unsub();
   }, []);
 
-  // Se você não quiser mostrar nada na UI, pode retornar null.
   return status ? (
-    <div style={{ marginTop: 12, opacity: 0.85, fontSize: 14 }}>{status}</div>
+    <div style={{ marginTop: 10, fontSize: 13, opacity: 0.85 }}>{status}</div>
   ) : null;
 }

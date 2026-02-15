@@ -6,6 +6,9 @@ import { useEffect, useState } from "react";
 import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
 import "@/lib/firebaseClient";
 
+// ✅ ADICIONADO
+import PushClient from "@/components/PushClient";
+
 export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -91,7 +94,13 @@ export default function TopNav() {
       </div>
 
       <div style={{ height: 1, background: "rgba(255,255,255,0.12)" }} />
+
+      {/* ✅ ADICIONADO: ativa push só quando logado + verificado */}
+      {canAccessPrivate && (
+        <div style={{ padding: "0 12px 10px 12px" }}>
+          <PushClient />
+        </div>
+      )}
     </div>
   );
 }
-
