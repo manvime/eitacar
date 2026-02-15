@@ -25,3 +25,9 @@ git status
 git add .
 git commit -m "Update lib"
 git push origin main
+
+
+git status
+git add .
+git commit -m "Push web real + fix firebase init + pages"
+git push
