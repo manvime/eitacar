@@ -56,14 +56,12 @@ export default function TopNav() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 12 }}>
         <div style={{ fontWeight: 800, color: "white", marginRight: 10 }}>eitaCar</div>
 
-        {/* NÃO logado ou NÃO verificado -> só Login */}
         {!canAccessPrivate && (
           <Link href="/login" style={btnStyle(isActive("/login"))}>
             Login
           </Link>
         )}
 
-        {/* Logado + verificado -> Perfil/Buscar/Chats/Admin */}
         {canAccessPrivate && (
           <>
             <Link href="/perfil" style={btnStyle(isActive("/perfil"))}>
@@ -85,7 +83,6 @@ export default function TopNav() {
 
         <div style={{ flex: 1 }} />
 
-        {/* Sair só quando logado+verificado */}
         {canAccessPrivate && (
           <button onClick={handleLogout} style={btnStyle(false)}>
             Sair
@@ -95,12 +92,9 @@ export default function TopNav() {
 
       <div style={{ height: 1, background: "rgba(255,255,255,0.12)" }} />
 
-      {/* ✅ ADICIONADO: ativa push só quando logado + verificado */}
-      {canAccessPrivate && (
-        <div style={{ padding: "0 12px 10px 12px" }}>
-          <PushClient />
-        </div>
-      )}
+      {/* ✅ BOX para permitir/desativar push */}
+      {canAccessPrivate && <div style={{ padding: "0 12px 12px 12px" }}><PushClient /></div>}
     </div>
   );
 }
+
