@@ -1,39 +1,60 @@
+// app/api/push/deleteToken/route.js
 import { NextResponse } from "next/server";
-import { getUidFromAuth } from "@/lib/auth";
-import { db } from "@/lib/firebaseAdmin";
+
+// ✅ usando caminho relativo (não depende do alias @)
+// Certifique-se que o arquivo está em /lib/firebaseAdmin.js
+import adminProxy, { db, authAdmin } from "../../../../lib/firebaseAdmin";
+
+async function requireUser(req) {
+  const authHeader = req.headers.get("authorization") || "";
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  const idToken = match?.[1];
+
+  if (!idToken) {
+    throw new Error("Sem Authorization: Bearer <token>.");
+  }
+
+  // authAdmin vem do seu firebaseAdmin.js (lazy init)
+  const decoded = await authAdmin.verifyIdToken(idToken);
+  return decoded; // { uid, email, ... }
+}
 
 export async function POST(req) {
   try {
-    const uid = await getUidFromAuth(req);
+    const user = await requireUser(req);
+
     const body = await req.json().catch(() => ({}));
-    const token = (body.token || "").toString().trim();
+    const token = body?.token;
 
-    if (!uid) return NextResponse.json({ error: "Sem token" }, { status: 401 });
-    if (!token) return NextResponse.json({ error: "token obrigatório" }, { status: 400 });
+    if (!token || typeof token !== "string") {
+      return NextResponse.json(
+        { ok: false, error: "Campo 'token' é obrigatório (string)." },
+        { status: 400 }
+      );
+    }
 
-    const ref = db.collection("users").doc(uid);
-
-    // remove token do mapa
-    await ref.set(
-      {
-        pushTokens: { [token]: db.FieldValue?.delete?.() }, // pode não existir dependendo do seu wrapper
-      },
-      { merge: true }
-    );
-
-    // se seu wrapper não tem FieldValue, use admin.firestore.FieldValue.delete() dentro do firebaseAdmin export.
-
-    // opcional: marcar disabled
-    await ref.set(
-      {
-        pushEnabled: false,
-        pushUpdatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    // Modelo: users/{uid}/pushTokens/{token}
+    await db
+      .collection("users")
+      .doc(user.uid)
+      .collection("pushTokens")
+      .doc(token)
+      .delete();
 
     return NextResponse.json({ ok: true });
-  } catch (e) {
-    return NextResponse.json({ error: e?.message || "Erro" }, { status: 500 });
+  } catch (err) {
+    console.error("deleteToken error:", err);
+
+    // se token inválido/expirado
+    const msg = err?.message || "Erro interno";
+    const isAuth =
+      msg.includes("Authorization") ||
+      msg.toLowerCase().includes("id token") ||
+      msg.toLowerCase().includes("token");
+
+    return NextResponse.json(
+      { ok: false, error: msg },
+      { status: isAuth ? 401 : 500 }
+    );
   }
 }
