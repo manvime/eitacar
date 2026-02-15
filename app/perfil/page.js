@@ -2,16 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import "@/lib/firebaseClient";
-import { db } from "@/lib/firebaseClient";
+
+import { auth, db } from "@/lib/firebaseClient";
+import {
+  enablePushAndSaveToken,
+  disablePushAndDeleteToken,
+  getNotificationPermission,
+  pushIsSupported,
+} from "@/lib/firebaseClient";
 
 function onlyDigits(v) {
   return (v || "").replace(/\D+/g, "");
 }
 
-// Placa BR: antiga ABC1234 ou Mercosul ABC1D23 (aceita letra/número no meio)
+// Placa BR: antiga ABC1234 ou Mercosul ABC1D23
 function normalizePlate(input) {
   const v = (input || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   return v.slice(0, 7);
@@ -26,8 +32,11 @@ export default function PerfilPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // ✅ UI do toggle (sem push ainda)
+  // ===== Push REAL =====
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushPerm, setPushPerm] = useState("default"); // default | granted | denied | unsupported
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
 
   const [form, setForm] = useState({
     placa: "",
@@ -41,33 +50,41 @@ export default function PerfilPage() {
 
   const canAccess = !!user && !!user.emailVerified;
 
-  // auth
+  // ===== Auth listener =====
   useEffect(() => {
-    const auth = getAuth();
-    return onAuthStateChanged(auth, (u) => {
+    const unsub = onAuthStateChanged(auth, (u) => {
       setAuthState({ loading: false, user: u || null });
     });
+    return () => unsub();
   }, []);
 
-  // carrega preferencia local do botão (apenas UI)
+  // ===== Push state init =====
   useEffect(() => {
-    try {
-      const v = localStorage.getItem("push_enabled");
-      setPushEnabled(v === "1");
-    } catch {}
+    (async () => {
+      const ok = await pushIsSupported();
+      setPushSupported(ok);
+
+      const p = getNotificationPermission();
+      setPushPerm(p === "unsupported" ? "unsupported" : p);
+
+      // nosso enable() salva em localStorage("fcmToken")
+      try {
+        setPushEnabled(!!localStorage.getItem("fcmToken"));
+      } catch {
+        setPushEnabled(false);
+      }
+    })();
   }, []);
 
-  // carrega perfil
+  // ===== Carrega perfil =====
   useEffect(() => {
     if (authState.loading) return;
 
-    // Se não estiver logado -> vai pro login
     if (!user) {
       router.push("/login");
       return;
     }
 
-    // Se não verificou email -> volta pro login (lá você já mostra o aviso)
     if (!user.emailVerified) {
       router.push("/login");
       return;
@@ -80,8 +97,7 @@ export default function PerfilPage() {
         const snap = await getDoc(ref);
         if (snap.exists()) {
           const data = snap.data() || {};
-          setForm((prev) => ({
-            ...prev,
+          setForm({
             placa: data.placa || "",
             whatsapp: data.whatsapp || "",
             ano: data.ano || "",
@@ -89,7 +105,7 @@ export default function PerfilPage() {
             modelo: data.modelo || "",
             endereco: data.endereco || "",
             cep: data.cep || "",
-          }));
+          });
         }
       } catch (e) {
         console.error("Erro ao carregar perfil:", e);
@@ -143,6 +159,7 @@ export default function PerfilPage() {
       fontWeight: 700,
       cursor: "pointer",
       minWidth: 140,
+      opacity: variant === "disabled" ? 0.6 : 1,
     });
 
     const help = { marginTop: 6, opacity: 0.75, fontSize: 13 };
@@ -161,18 +178,11 @@ export default function PerfilPage() {
     setForm((p) => ({ ...p, [name]: value }));
   }
 
-  function setPushLocal(next) {
-    setPushEnabled(next);
-    try {
-      localStorage.setItem("push_enabled", next ? "1" : "0");
-    } catch {}
-  }
-
   async function handleSave() {
     if (!canAccess) return;
 
     const placa = normalizePlate(form.placa);
-    const whatsapp = onlyDigits(form.whatsapp).slice(0, 11); // BR: DDD + número (11 dígitos geralmente)
+    const whatsapp = onlyDigits(form.whatsapp).slice(0, 11);
     const cep = onlyDigits(form.cep).slice(0, 8);
 
     if (placa.length !== 7) {
@@ -201,191 +211,171 @@ export default function PerfilPage() {
         },
         { merge: true }
       );
-
-      alert("Perfil salvo!");
+      alert("Salvo ✅");
     } catch (e) {
-      console.error("Erro ao salvar perfil:", e);
-      alert("Erro ao salvar. Veja o console/log.");
+      console.error(e);
+      alert("Erro ao salvar.");
     } finally {
       setSaving(false);
     }
   }
 
+  // ===== Push actions =====
+  async function handleEnablePush() {
+    if (!user) return alert("Faça login primeiro.");
+    try {
+      setPushBusy(true);
+      await enablePushAndSaveToken(); // salva no servidor e grava localStorage("fcmToken")
+      setPushPerm(getNotificationPermission());
+      setPushEnabled(true);
+      alert("Notificações ATIVADAS ✅");
+    } catch (e) {
+      alert(e?.message || "Falha ao ativar notificações.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function handleDisablePush() {
+    if (!user) return alert("Faça login primeiro.");
+    try {
+      setPushBusy(true);
+      await disablePushAndDeleteToken({ unregisterServiceWorker: false }); // chama DELETE no servidor
+      setPushPerm(getNotificationPermission());
+      setPushEnabled(false);
+      alert("Notificações DESATIVADAS ✅");
+    } catch (e) {
+      alert(e?.message || "Falha ao desativar notificações.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
   if (authState.loading || loading) {
     return (
-      <div style={{ color: "white", padding: 18, maxWidth: 820, margin: "20px auto" }}>
-        Carregando perfil...
+      <div style={{ padding: 24, color: "white", opacity: 0.85 }}>
+        Carregando...
       </div>
     );
   }
 
   return (
-    <div style={{ padding: 12 }}>
-      <div style={styles.card}>
-        <h2 style={{ margin: 0, marginBottom: 10 }}>Perfil</h2>
-        <div style={{ opacity: 0.75, marginBottom: 18 }}>
-          Preencha os dados do seu carro.
-        </div>
+    <div style={styles.card}>
+      <h2 style={{ marginTop: 0 }}>Perfil</h2>
+      <div style={{ opacity: 0.8, marginBottom: 14 }}>Preencha os dados do seu carro.</div>
 
-        {/* ✅ BOX: NOTIFICAÇÕES (só UI por enquanto) */}
-        <div style={styles.box}>
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>Notificações</div>
-          <div style={{ opacity: 0.8, fontSize: 13, marginBottom: 10 }}>
-            Status: <b>{pushEnabled ? "ATIVADAS" : "DESATIVADAS"}</b> (ainda sem função — só botão)
-          </div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={() => setPushLocal(true)}
-              style={{
-                ...styles.btn("primary"),
-                opacity: pushEnabled ? 0.85 : 1,
-              }}
-            >
-              Ativar
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setPushLocal(false)}
-              style={styles.btn("ghost")}
-            >
-              Desativar
-            </button>
-          </div>
-        </div>
-
-        <div style={{ height: 16 }} />
-
-        <div style={styles.row}>
+      {/* ===== Box Notificações (BOTÃO REAL) ===== */}
+      <div style={{ ...styles.box, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
           <div>
-            <label style={styles.label}>Placa</label>
-            <input
-              style={styles.input}
-              value={form.placa}
-              onChange={(e) => setField("placa", normalizePlate(e.target.value))}
-              placeholder="ABC1234 ou ABC1D23"
-              inputMode="text"
-              autoComplete="off"
-            />
-            <div style={styles.help}>(antiga ABC1234 ou Mercosul ABC1D23)</div>
-          </div>
-
-          <div>
-            <label style={styles.label}>WhatsApp (DDD + número, só números)</label>
-            <div style={{ display: "flex", gap: 10 }}>
-              <div
-                style={{
-                  padding: "12px 12px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(255,255,255,0.15)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "white",
-                  fontWeight: 700,
-                  minWidth: 86,
-                  textAlign: "center",
-                }}
-                title="Brasil"
-              >
-                BR +55
-              </div>
-              <input
-                style={styles.input}
-                value={form.whatsapp}
-                onChange={(e) => setField("whatsapp", onlyDigits(e.target.value))}
-                placeholder="11999998888"
-                inputMode="numeric"
-                autoComplete="off"
-              />
+            <div style={{ fontWeight: 800 }}>Notificações</div>
+            <div style={{ opacity: 0.75, fontSize: 13 }}>
+              Suporte: <b>{pushSupported ? "SIM" : "NÃO"}</b> • Permissão: <b>{pushPerm}</b> • Status:{" "}
+              <b>{pushEnabled ? "Ativado" : "Desativado"}</b>
             </div>
-            <div style={styles.help}>Ex.: 11999998888</div>
           </div>
+
+          {pushSupported ? (
+            pushEnabled ? (
+              <button
+                style={styles.btn(pushBusy ? "disabled" : "primary")}
+                disabled={pushBusy}
+                onClick={handleDisablePush}
+              >
+                {pushBusy ? "Aguarde..." : "Desativar"}
+              </button>
+            ) : (
+              <button
+                style={styles.btn(pushBusy ? "disabled" : "primary")}
+                disabled={pushBusy}
+                onClick={handleEnablePush}
+              >
+                {pushBusy ? "Aguarde..." : "Ativar"}
+              </button>
+            )
+          ) : (
+            <button style={styles.btn("disabled")} disabled>
+              Indisponível
+            </button>
+          )}
         </div>
 
-        <div style={{ height: 14 }} />
-
-        <div style={styles.row3}>
-          <div>
-            <label style={styles.label}>Ano</label>
-            <input
-              style={styles.input}
-              value={form.ano}
-              onChange={(e) => setField("ano", e.target.value)}
-              placeholder="2020"
-              inputMode="numeric"
-              autoComplete="off"
-            />
+        {pushPerm === "denied" && (
+          <div style={{ marginTop: 10, color: "#ffb", fontSize: 13 }}>
+            Seu navegador bloqueou notificações. Clique no cadeado do site → Permissões → Notificações → Permitir.
           </div>
+        )}
+      </div>
 
-          <div>
-            <label style={styles.label}>Cor</label>
-            <input
-              style={styles.input}
-              value={form.cor}
-              onChange={(e) => setField("cor", e.target.value)}
-              placeholder="Preto"
-              autoComplete="off"
-            />
-          </div>
-
-          <div>
-            <label style={styles.label}>Modelo</label>
-            <input
-              style={styles.input}
-              value={form.modelo}
-              onChange={(e) => setField("modelo", e.target.value)}
-              placeholder="Onix 1.0"
-              autoComplete="off"
-            />
-          </div>
+      {/* ===== Form ===== */}
+      <div style={styles.row}>
+        <div>
+          <label style={styles.label}>Placa</label>
+          <input
+            style={styles.input}
+            value={form.placa}
+            onChange={(e) => setField("placa", e.target.value)}
+            placeholder="ABC1234 ou ABC1D23"
+          />
+          <div style={styles.help}>(antiga ABC1234 ou Mercosul ABC1D23)</div>
         </div>
 
-        <div style={{ height: 14 }} />
-
-        <div style={styles.row}>
-          <div>
-            <label style={styles.label}>Endereço</label>
+        <div>
+          <label style={styles.label}>WhatsApp (DDD + número, só números)</label>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ padding: "12px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", fontWeight: 800 }}>
+              BR +55
+            </div>
             <input
               style={styles.input}
-              value={form.endereco}
-              onChange={(e) => setField("endereco", e.target.value)}
-              placeholder="Rua, número, bairro, cidade"
-              autoComplete="off"
+              value={form.whatsapp}
+              onChange={(e) => setField("whatsapp", onlyDigits(e.target.value))}
+              placeholder="11999999999"
             />
           </div>
-
-          <div>
-            <label style={styles.label}>CEP</label>
-            <input
-              style={styles.input}
-              value={form.cep}
-              onChange={(e) => setField("cep", onlyDigits(e.target.value))}
-              placeholder="00000000"
-              inputMode="numeric"
-              autoComplete="off"
-            />
-          </div>
+          <div style={styles.help}>Ex.: 11999999999</div>
         </div>
+      </div>
 
-        <div style={{ height: 18 }} />
+      <div style={{ height: 12 }} />
 
-        <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{
-              ...styles.btn("primary"),
-              opacity: saving ? 0.7 : 1,
-            }}
-          >
-            {saving ? "Salvando..." : "Salvar"}
-          </button>
-
-          <button onClick={() => router.push("/buscar")} style={styles.btn("ghost")}>
-            Ir para Buscar
-          </button>
+      <div style={styles.row3}>
+        <div>
+          <label style={styles.label}>Ano</label>
+          <input style={styles.input} value={form.ano} onChange={(e) => setField("ano", e.target.value)} placeholder="2020" />
         </div>
+        <div>
+          <label style={styles.label}>Cor</label>
+          <input style={styles.input} value={form.cor} onChange={(e) => setField("cor", e.target.value)} placeholder="Preto" />
+        </div>
+        <div>
+          <label style={styles.label}>Modelo</label>
+          <input style={styles.input} value={form.modelo} onChange={(e) => setField("modelo", e.target.value)} placeholder="Onix 1.0" />
+        </div>
+      </div>
+
+      <div style={{ height: 12 }} />
+
+      <div style={styles.row}>
+        <div>
+          <label style={styles.label}>Endereço</label>
+          <input style={styles.input} value={form.endereco} onChange={(e) => setField("endereco", e.target.value)} placeholder="Rua, número, bairro, cidade" />
+        </div>
+        <div>
+          <label style={styles.label}>CEP</label>
+          <input style={styles.input} value={form.cep} onChange={(e) => setField("cep", onlyDigits(e.target.value))} placeholder="00000000" />
+        </div>
+      </div>
+
+      <div style={{ height: 16 }} />
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button style={styles.btn("primary")} onClick={handleSave} disabled={!canAccess || saving}>
+          {saving ? "Salvando..." : "Salvar"}
+        </button>
+        <button style={styles.btn("secondary")} onClick={() => router.push("/buscar")} disabled={!canAccess}>
+          Ir para Buscar
+        </button>
       </div>
     </div>
   );
