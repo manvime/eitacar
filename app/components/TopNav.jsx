@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
 import "@/lib/firebaseClient";
 
-// ✅ Import relativo (porque está em app/components)
+// ✅ IMPORT CERTO (app/components)
 import PushClient from "./PushClient";
 
 export default function TopNav() {
@@ -65,39 +65,4 @@ export default function TopNav() {
         {canAccessPrivate && (
           <>
             <Link href="/perfil" style={btnStyle(isActive("/perfil"))}>
-              Perfil
-            </Link>
-            <Link href="/buscar" style={btnStyle(isActive("/buscar"))}>
-              Buscar
-            </Link>
-            <Link href="/chats" style={btnStyle(isActive("/chats"))}>
-              Chats
-            </Link>
-            {isAdmin && (
-              <Link href="/admin" style={btnStyle(isActive("/admin"))}>
-                Admin
-              </Link>
-            )}
-          </>
-        )}
 
-        <div style={{ flex: 1 }} />
-
-        {isLoggedIn && (
-          <button onClick={handleLogout} style={btnStyle(false)}>
-            Sair
-          </button>
-        )}
-      </div>
-
-      <div style={{ height: 1, background: "rgba(255,255,255,0.12)" }} />
-
-      {/* ✅ BOX DAS NOTIFICAÇÕES */}
-      {isLoggedIn && (
-        <div style={{ padding: "0 12px 12px 12px" }}>
-          <PushClient />
-        </div>
-      )}
-    </div>
-  );
-}
